@@ -213,14 +213,21 @@ def create_worker(
     def frame(camera_id: int, request: Request):
         run = camera(request, camera_id)
         with run.lock:
-            if run.jpeg is None or run.result is None:
-                return Response(status_code=204)
+            if run.state not in {"running", "draining"} or run.jpeg is None or run.result is None:
+                return Response(
+                    status_code=204,
+                    headers={
+                        "X-Stream-Session": run.stream_session_id,
+                        "X-Camera-State": run.state,
+                    },
+                )
             result = run.result
             return Response(
                 run.jpeg,
                 media_type="image/jpeg",
                 headers={
                     "X-Stream-Session": result["stream_session_id"],
+                    "X-Camera-State": run.state,
                     "X-Frame-Id": str(result["frame_id"]),
                     "X-Captured-At": result["captured_at"],
                     "Cache-Control": "no-store",

@@ -36,7 +36,7 @@ def main():
         if before["worker"]["status"] != "ok":
             raise RuntimeError("Worker unavailable")
         if any(
-            run["state"] in {"opening", "running", "draining", "stopping"}
+            run["state"] in {"opening", "running", "reconnecting", "draining", "stopping"}
             for run in before["worker"]["cameras"]
         ):
             raise RuntimeError("Stop other cameras before a one-channel benchmark")
@@ -72,7 +72,8 @@ def main():
                 active = checked(client.get("/api/system/status"))["worker"].get("cameras", [])
                 if any(
                     run["camera_id"] != camera_id
-                    and run["state"] in {"opening", "running", "draining", "stopping"}
+                    and run["state"]
+                    in {"opening", "running", "reconnecting", "draining", "stopping"}
                     for run in active
                 ):
                     raise RuntimeError("Another camera started during the single-channel benchmark")
@@ -101,7 +102,7 @@ def main():
                 raise RuntimeError("Face-enabled benchmark requires a qualified real embedding")
             thumbnail_verified = False
             if args.require_embeddings:
-                tracks = status.get("result", {}).get("tracks", [])
+                tracks = (status.get("result") or {}).get("tracks", [])
                 ready = next(
                     (track for track in tracks if track.get("face", {}).get("embedding_ready")),
                     None,

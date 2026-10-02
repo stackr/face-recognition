@@ -6,16 +6,17 @@ import uuid
 from collections import Counter, OrderedDict, deque
 from concurrent.futures import Future
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from queue import Empty, Full, Queue
 
 import cv2
 import numpy as np
 
 from app.worker.faces import TrackFaces
+from app.worker.reconnect import reconnect_delay
 from app.worker.tracker import CameraTracker
 
-ACTIVE = {"opening", "running", "draining", "stopping"}
+ACTIVE = {"opening", "running", "reconnecting", "draining", "stopping"}
 
 
 @dataclass(frozen=True)
@@ -28,9 +29,10 @@ class Frame:
 
 
 class CameraRun:
-    def __init__(self, camera_id, source, source_type, loop, settings):
+    def __init__(self, camera_id, source, source_type, loop, settings, actual_device=None):
         self.camera_id, self.source, self.source_type = camera_id, source, source_type
         self.loop, self.settings = loop, settings
+        self.actual_device = actual_device
         self.lock = threading.RLock()
         self.cancel = threading.Event()
         self.stream_session_id = uuid.uuid4().hex
@@ -45,6 +47,10 @@ class CameraRun:
         self.next_due = 0
         self.captured = self.processed = self.dropped = 0
         self.loops = 0
+        self.connection_attempts = self.reconnects = self.consecutive_failures = 0
+        self.next_retry_mono = self.next_retry_at = None
+        self.connected_at = self.last_frame_at = self.last_frame_mono = None
+        self.session_captured = self.session_processed = 0
         self.input_fps = 0
         self.resolution = None
         self.latencies = deque(maxlen=600)
@@ -57,18 +63,132 @@ class CameraRun:
         )
 
     def capture(self):
-        cap = None
         try:
-            # OpenCV/FFmpeg errors must never echo an RTSP password to stderr.
-            os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
             if self.source_type == "rtsp":
+                self.capture_rtsp()
+            else:
+                self.capture_mp4()
+        except Exception:
+            self.fail("capture_failed")
+        finally:
+            with self.lock:
+                self.source = ""  # Erase credentials after the capture thread exits.
+                if self.state == "stopping":
+                    self.state = "stopped"
+                    self.ended_mono = self.ended_mono or time.monotonic()
+                    self.clear_session()
+
+    def clear_session(self, *, rotate=False):
+        # Caller holds run.lock; replacing both objects drops candidates and all
+        # per-track state. Future event cooldowns must belong to this session too.
+        if rotate:
+            self.stream_session_id = uuid.uuid4().hex
+            self.session_captured = self.session_processed = 0
+            self.connected_at = None
+        self.latest = self.jpeg = self.result = self.tracker = self.faces = None
+        self.next_due = 0
+
+    def queue_frame(self, image):
+        now = time.monotonic()
+        with self.lock:
+            if self.cancel.is_set():
+                return
+            self.captured += 1
+            self.session_captured += 1
+            if self.latest is not None:
+                self.dropped += 1
+            self.resolution = [image.shape[1], image.shape[0]]
+            self.last_frame_at = datetime.now(UTC).isoformat()
+            self.last_frame_mono = now
+            self.latest = Frame(
+                image, self.stream_session_id, self.session_captured, self.last_frame_at, now
+            )
+
+    def retry(self, code):
+        with self.lock:
+            if self.cancel.is_set():
+                return
+            self.consecutive_failures += 1
+            delay = reconnect_delay(self.settings, self.consecutive_failures)
+            self.clear_session(rotate=True)
+            self.state, self.error_code = "reconnecting", code
+            self.next_retry_mono = time.monotonic() + delay
+            self.next_retry_at = (datetime.now(UTC) + timedelta(seconds=delay)).isoformat()
+        logging.getLogger("cctv.worker").warning(
+            "Camera %s reconnect pending; code=%s delay=%.2f", self.camera_id, code, delay
+        )
+        self.cancel.wait(delay)
+
+    def capture_rtsp(self):
+        os.environ.setdefault("OPENCV_FFMPEG_CAPTURE_OPTIONS", "rtsp_transport;tcp")
+        while not self.cancel.is_set():
+            cap = None
+            failure = "source_open_failed"
+            first_frame_mono = None
+            with self.lock:
+                self.connection_attempts += 1
+                attempt = self.connection_attempts
+                self.next_retry_at = self.next_retry_mono = None
+            try:
                 cap = cv2.VideoCapture(
                     self.source,
                     cv2.CAP_FFMPEG,
-                    [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 3000],
+                    [
+                        cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
+                        round(self.settings.rtsp_open_timeout_seconds * 1000),
+                        cv2.CAP_PROP_READ_TIMEOUT_MSEC,
+                        round(self.settings.rtsp_read_timeout_seconds * 1000),
+                    ],
                 )
-            else:
-                cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
+                if self.cancel.is_set():
+                    return
+                if cap.isOpened():
+                    if (
+                        cap.get(cv2.CAP_PROP_FRAME_WIDTH) > 3840
+                        or cap.get(cv2.CAP_PROP_FRAME_HEIGHT) > 2160
+                    ):
+                        self.fail("source_resolution_exceeded")
+                        return
+                    fps = float(cap.get(cv2.CAP_PROP_FPS))
+                    with self.lock:
+                        self.input_fps = fps if np.isfinite(fps) and 0 < fps <= 240 else 25
+                    failure = "source_read_failed"
+                    while not self.cancel.is_set():
+                        ok, image = cap.read()
+                        if self.cancel.is_set():
+                            return
+                        if not ok or image is None:
+                            break
+                        if image.shape[0] > 2160 or image.shape[1] > 3840:
+                            self.fail("source_resolution_exceeded")
+                            return
+                        now = time.monotonic()
+                        with self.lock:
+                            if first_frame_mono is None:
+                                first_frame_mono = now
+                                self.connected_at = datetime.now(UTC).isoformat()
+                                self.reconnects += int(attempt > 1)
+                                logging.getLogger("cctv.worker").info(
+                                    "Camera %s stream connected; attempt=%s",
+                                    self.camera_id,
+                                    attempt,
+                                )
+                            if now - first_frame_mono >= self.settings.rtsp_reconnect_reset_seconds:
+                                self.consecutive_failures = 0
+                        self.queue_frame(image)
+            except Exception:
+                failure = "capture_failed"
+            finally:
+                if cap is not None:
+                    cap.release()
+            self.retry(failure)
+
+    def capture_mp4(self):
+        cap = None
+        try:
+            cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
+            if self.cancel.is_set():
+                return
             if not cap.isOpened():
                 self.fail("source_open_failed")
                 return
@@ -85,16 +205,16 @@ class CameraRun:
             while not self.cancel.is_set():
                 ok, image = cap.read()
                 if not ok:
-                    if self.source_type == "mp4" and self.loop and index:
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                    if self.loop and index:
+                        if not cap.set(cv2.CAP_PROP_POS_FRAMES, 0):
+                            self.fail("video_seek_failed")
+                            return
                         with self.lock:
-                            self.stream_session_id = uuid.uuid4().hex
-                            self.tracker = self.faces = None
-                            self.latest = self.jpeg = self.result = None
+                            self.clear_session(rotate=True)
                             self.loops += 1
                         origin, index = time.monotonic(), 0
                         continue
-                    if self.source_type == "mp4" and index:
+                    if index:
                         with self.lock:
                             self.state = "draining"
                         return
@@ -103,37 +223,23 @@ class CameraRun:
                 if image.shape[0] > 2160 or image.shape[1] > 3840:
                     self.fail("source_resolution_exceeded")
                     return
-                if self.source_type == "mp4":
-                    self.cancel.wait(max(0, origin + index / self.input_fps - time.monotonic()))
+                self.cancel.wait(max(0, origin + index / self.input_fps - time.monotonic()))
                 if self.cancel.is_set():
                     return
                 index += 1
-                with self.lock:
-                    self.captured += 1
-                    if self.latest is not None:
-                        self.dropped += 1
-                    self.resolution = [image.shape[1], image.shape[0]]
-                    self.latest = Frame(
-                        image,
-                        self.stream_session_id,
-                        self.captured,
-                        datetime.now(UTC).isoformat(),
-                        time.monotonic(),
-                    )
-                    # "running" means a successfully analysed frame, not only an open source.
-        except Exception:
-            self.fail("capture_failed")
+                self.queue_frame(image)
         finally:
             if cap is not None:
                 cap.release()
-            self.source = ""  # Erase credentials after the capture thread exits.
 
     def fail(self, code):
         with self.lock:
+            if self.cancel.is_set() and self.state in {"stopping", "stopped"}:
+                return
             self.state, self.error_code = "error", code
-            self.latest = self.jpeg = self.result = self.tracker = self.faces = None
+            self.clear_session()
             self.ended_mono = time.monotonic()
-        self.cancel.set()
+            self.cancel.set()
         logging.getLogger("cctv.worker").warning("Camera %s failed; code=%s", self.camera_id, code)
 
     def status(self):
@@ -144,9 +250,25 @@ class CameraRun:
                 "state": self.state,
                 "error_code": self.error_code,
                 "source_type": self.source_type,
+                "actual_device": self.actual_device,
                 "stream_session_id": self.stream_session_id,
                 "loop": self.loop,
                 "loops": self.loops,
+                "connection_attempts": self.connection_attempts,
+                "reconnect_attempts": max(0, self.connection_attempts - 1),
+                "reconnects": self.reconnects,
+                "consecutive_failures": self.consecutive_failures,
+                "next_retry_at": self.next_retry_at,
+                "next_retry_seconds": round(max(0, self.next_retry_mono - time.monotonic()), 2)
+                if self.next_retry_mono is not None
+                else None,
+                "connected_at": self.connected_at,
+                "last_frame_at": self.last_frame_at,
+                "last_frame_age_seconds": round(time.monotonic() - self.last_frame_mono, 2)
+                if self.last_frame_mono is not None
+                else None,
+                "session_captured_frames": self.session_captured,
+                "session_processed_frames": self.session_processed,
                 "resolution": self.resolution,
                 "input_fps": round(self.input_fps, 2),
                 "elapsed_seconds": round(elapsed, 2),
@@ -198,7 +320,14 @@ class WorkerRuntime:
                 >= self.settings.max_active_cameras
             ):
                 raise OverflowError("Active camera limit reached")
-            run = CameraRun(camera_id, source, source_type, loop, self.settings)
+            run = CameraRun(
+                camera_id,
+                source,
+                source_type,
+                loop,
+                self.settings,
+                self.detector.info["actual_device"],
+            )
             self.runs[camera_id] = run
             self.runs.move_to_end(camera_id)
             # Retain only bounded terminal status history; no images in stopped runs.
@@ -221,13 +350,21 @@ class WorkerRuntime:
         run.cancel.set()
         with run.lock:
             run.state = "stopping"
-        run.thread.join(timeout=6)
+            run.clear_session()
+            run.next_retry_at = run.next_retry_mono = None
+        run.thread.join(
+            timeout=max(
+                6,
+                self.settings.rtsp_open_timeout_seconds + 1,
+                self.settings.rtsp_read_timeout_seconds + 1,
+            )
+        )
         if run.thread.is_alive():
             raise TimeoutError("Capture did not stop")
         with run.lock:
             run.state = "stopped"
             run.ended_mono = run.ended_mono or time.monotonic()
-            run.latest = run.jpeg = run.result = run.tracker = run.faces = None
+            run.clear_session()
             run.source = ""
         return run.status()
 
@@ -344,6 +481,7 @@ class WorkerRuntime:
                             "search_status": search_status,
                         }
                         run.processed += 1
+                        run.session_processed += 1
                         run.face_counts.update(face_counts)
                         if face_counts["analysis_frames"]:
                             run.face_ms.append(face_ms)
@@ -352,11 +490,15 @@ class WorkerRuntime:
                         run.latencies.append((time.monotonic() - frame.captured_mono) * 1000)
                         if run.state != "draining":
                             run.state = "running"
+                            run.error_code = None
                 except Exception as exc:
-                    logging.getLogger("cctv.worker").error(
-                        "Camera %s inference failed; type=%s", run.camera_id, type(exc).__name__
-                    )
-                    run.fail("inference_failed")
+                    with run.lock:
+                        if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
+                            continue
+                        logging.getLogger("cctv.worker").error(
+                            "Camera %s inference failed; type=%s", run.camera_id, type(exc).__name__
+                        )
+                        run.fail("inference_failed")
             self.cancel.wait(0.005)
 
     def analyze_reference(self, content):

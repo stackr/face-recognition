@@ -17,7 +17,7 @@ def main():
         active = []
         for camera in checked(client.get("/api/cameras")):
             state = checked(client.get(f"/api/cameras/{camera['camera_id']}/status"))
-            if state["state"] in {"opening", "running", "draining"}:
+            if state["state"] in {"opening", "running", "reconnecting", "draining"}:
                 active.append((camera["camera_id"], state["source_type"], state.get("loop", True)))
         subprocess.run(
             ["systemctl", "--user", "restart", "cctv-worker.service", "cctv-backend.service"],

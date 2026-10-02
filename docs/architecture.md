@@ -35,9 +35,9 @@ flowchart LR
 - Qdrant는 localhost에 바인딩하는 native 바이너리다. Phase 1은 임시 smoke collection을 사용한다. Phase 4의 `face_embeddings`는 512D cosine, owner/model-version metadata로 검증하며 기존 다른 collection을 덮어쓰지 않는다.
 - native user services는 로그인 사용자의 권한과 프로젝트 working directory로 실행한다. API/worker는 각각 `application.log`/`worker.log`를 rotation한다. native decoder stderr는 RTSP 주소 유출을 막기 위해 worker에서 숨긴다.
 
-## 구현된 GPU worker (Phase 2~4)
+## 구현된 GPU worker (Phase 2~5)
 
-API와 GPU worker는 별도 프로세스로 운영한다. worker 하나가 YOLO 모델과 CUDA inference backend를 소유한다. 카메라별 capture thread, latest-frame buffer, tracker를 분리하고 하나의 순차 scheduler에서 모델을 공유한다. 한 순회에서 각 준비된 카메라를 한 번씩 처리하며 목표 cadence는 기본 5 FPS다. admission 상한은 기본 4다. API worker는 하나이며 GPU 라이브러리를 로딩하지 않는다. 얼굴 ONNX session 3개도 같은 worker가 공유한다. 자동 reconnect는 후속 구현이다.
+API와 GPU worker는 별도 프로세스로 운영한다. worker 하나가 YOLO 모델과 CUDA inference backend를 소유한다. 카메라별 capture thread, latest-frame buffer, tracker를 분리하고 하나의 순차 scheduler에서 모델을 공유한다. 한 순회에서 각 준비된 카메라를 한 번씩 처리하며 목표 cadence는 기본 5 FPS다. admission 상한은 기본 4이며 재연결 대기도 포함한다. API worker는 하나이며 GPU 라이브러리를 로딩하지 않는다. 얼굴 ONNX session 3개도 같은 worker가 공유한다.
 
 통신은 localhost:8001의 내부 HTTP와 service token을 사용한다. API는 start/stop ACK를 확인한다. start는 `opening`을 반환하며 실제 분석 성공 후 `running`이 된다. source 실패는 secret 없는 code로 보고하고 worker 장애를 성공으로 응답하지 않는다. 변경/업로드/시작/삭제는 카메라별로 직렬화한다. worker는 status와 최신 JPEG를 제공하며 내부 endpoint는 Nginx 공개 proxy에 포함하지 않는다. 등록 사진 추론은 길이 2의 bounded queue를 통해 같은 GPU scheduler에서 카메라 추론과 순차 실행한다. reference reload 명령은 SQL revision 이상을 읽은 ACK를 확인한다.
 
@@ -49,9 +49,34 @@ API와 GPU worker는 별도 프로세스로 운영한다. worker 하나가 YOLO 
 
 frame 및 분석 결과에는 `camera_id`, `stream_session_id`, `frame_id`, capture timestamp가 있다. UTC는 저장 및 화면 시각, monotonic clock은 latency/timeout 측정에 사용한다. tracker update의 실제 간격과 lost-track 유지 시간을 반영한다.
 
-추적 ID의 유효 범위는 camera + stream session + track이다. ByteTrack의 기본 process-global ID counter를 camera-local counter로 대체하여 다른 카메라 시작이 기존 ID에 영향을 주지 않는다. lost 유지 시간은 기본 3초이며 실제 monotonic 경과 시간으로 만료한다. 기본 5 FPS에 맞게 frame buffer를 15로 변환하고 누락된 분석 tick의 Kalman 예측도 반영한다. identity/DB track/이벤트는 후속 구현이다. 현재 MP4 반복/분석 재시작에서 session UUID를 새로 만들고 이전 identity/cooldown을 이어 붙이지 않는다. DB track에는 독립된 기본키를 부여한다. event dedup key는 `(camera_id, stream_session_id, track_id, person_id)`다.
+추적 ID의 유효 범위는 camera + stream session + track이다. ByteTrack의 기본 process-global ID counter를 camera-local counter로 대체하여 다른 카메라 시작이 기존 ID에 영향을 주지 않는다. lost 유지 시간은 기본 3초이며 실제 monotonic 경과 시간으로 만료한다. 기본 5 FPS에 맞게 frame buffer를 15로 변환하고 누락된 분석 tick의 Kalman 예측도 반영한다. RTSP 실패, MP4 반복, 분석 재시작에서 session UUID를 새로 만들고 tracker/TrackFaces 전체를 교체한다. frame 번호는 session 안에서 1부터 시작하며 총 처리 통계와 구분한다. 비동기 추론의 publish/예외 처리 모두 session과 cancel을 확인한다. Phase 6의 DB track에는 독립된 기본키를 부여하고 event dedup/cooldown key는 `(camera_id, stream_session_id, track_id, person_id)`로 분리한다. 현재 검색 후보는 TrackFaces에 있고 이벤트 cooldown은 아직 없다.
 
 MVP 영상은 인증된 `/api/cameras/{id}/preview`에서 annotation을 그린 MJPEG를 제한 FPS로 전달한다. 이미 분석한 frame을 재사용하며 viewer마다 capture/inference를 새로 시작하지 않는다. 시청자는 기본 camera당 4명/전체 16명이다. 각 시청자는 캐시된 JPEG를 한 프레임씩 소비하고 ASGI backpressure를 적용하여 큐를 쌓지 않는다. 짧은 DB session으로 2초마다 로그인/계정/카메라 grant를 재확인하고 종료 시 viewer slot을 반환한다. JPEG는 최대 너비 1280으로 제한한다. 이후 WebRTC/HLS를 선택하면 encoding 비용/지연을 측정하고 별도 bbox overlay를 frame timestamp에 맞춘다.
+
+## RTSP 세션과 재연결 (Phase 5)
+
+```mermaid
+stateDiagram-v2
+    [*] --> opening: 시작
+    opening --> running: 새 프레임 분석 성공
+    opening --> reconnecting: 연결/읽기 실패
+    running --> reconnecting: 읽기 실패 또는 timeout
+    reconnecting --> reconnecting: 백오프 후 연결 재시도 실패
+    reconnecting --> running: 새 세션 프레임 분석 성공
+    opening --> stopping: 중지
+    running --> stopping: 중지
+    reconnecting --> stopping: 중지
+    stopping --> stopped: capture 종료
+    running --> error: 추론 실패 / 입력 해상도 초과
+    opening --> error: 입력 해상도 초과
+    reconnecting --> error: 입력 해상도 초과
+```
+
+FFmpeg backend를 TCP로 열고 open/read timeout을 생성자 params로 지정한다. 기본값은 5/3초이고 OpenCV의 open-only 속성이다. 재시도 간격은 `min(30, 1 × 2^(연속실패-1))`초에 20% jitter를 적용하며 30초를 넘지 않는다. 최대 간격에서도 계속 시도하고 10초 연속 수신 후 실패 횟수를 초기화한다. 대기에는 cancel Event를 사용하여 중지 시 즉시 깨어난다. 진행 중인 OpenCV 연산은 timeout으로 제한하고 그 직후 cancel을 검사한다. [OpenCV 공식 timeout 속성](https://docs.opencv.org/5.0/main_modules/videoio_flags_base.html)을 참고한다.
+
+실패 시 lock 안에서 session UUID를 교체하고 latest/JPEG/result/tracker/faces를 비운다. 현재 연결 시각은 초기화하고 최근 프레임 시각과 누적 통계는 진단용으로 유지한다. 실제 수신과 GPU 분석이 재개될 때 `running`이 되며 복구 횟수를 별도로 표시한다. 이전 session의 JPEG/얼굴 조회는 허용하지 않는다. 내부 frame 응답의 상태/session header로 MJPEG 연결을 끝내 viewer slot을 반환한다. Angular는 session 변경과 running 복귀를 감지해 미리보기를 다시 연결한다.
+
+단일 RTSP 입력의 실제 읽기 timeout·복구·중지·CUDA 얼굴 후보 생성은 공개 MP4를 MediaMTX/FFmpeg로 송출하여 검증한다. 시험 서버는 임시 localhost TCP port만 사용하고 다른 listener는 끈다. 실제 CCTV별 인증 방식/codec/network와 다중 카메라 성능은 이 시험으로 보장하지 않는다. [Phase 5 결과](phase5-report.md)를 참고한다.
 
 ## embedding 및 정확도 평가
 

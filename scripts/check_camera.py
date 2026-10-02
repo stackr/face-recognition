@@ -52,7 +52,7 @@ def main():
                 )
             )
             return
-        if current["state"] in {"opening", "running", "draining", "stopping"}:
+        if current["state"] in {"opening", "running", "reconnecting", "draining", "stopping"}:
             raise RuntimeError("Camera already active; preserved")
         status = checked(client.post(f"/api/cameras/{camera_id}/start", json={}))
         try:
@@ -89,7 +89,7 @@ def main():
             )
             print(json.dumps(report, indent=2))
         finally:
-            if not args.keep_running or status["state"] not in {"running", "error"}:
+            if not args.keep_running or status["state"] not in {"running", "reconnecting", "error"}:
                 checked(client.post(f"/api/cameras/{camera_id}/stop"))
 
 

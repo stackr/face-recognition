@@ -15,7 +15,7 @@ router = APIRouter(tags=["System"])
 
 @router.get("/api/health")
 def health():
-    return {"status": "ok", "phase": 4}
+    return {"status": "ok", "phase": 5}
 
 
 @router.get("/api/system/status")
@@ -79,7 +79,7 @@ def system_status(
         except (OSError, ValueError):
             gpu["status"] = "invalid_report"
     return {
-        "phase": 4,
+        "phase": 5,
         "checked_at": datetime.now(UTC).isoformat(),
         "services": dependencies,
         "gpu": gpu,

@@ -26,22 +26,33 @@ body { margin: 0; background: #f4f6fa; color: var(--ink); font-family: -apple-sy
 .person-list-heading h2 { margin-bottom: 6px; }
 .person-list-heading span { font-size: 13px; }
 .person-list-heading .btn { font-size: 13px; }
-.person-modal { width: min(960px, calc(100% - 32px)); max-height: calc(100dvh - 48px); margin: auto; padding: 0; border: 1px solid #e3e8f1; border-radius: 14px; color: var(--ink); background: #fff; box-shadow: 0 24px 80px #17233933; }
-.person-modal[open] { display: flex; flex-direction: column; }
-.person-modal::backdrop { background: #17243b99; }
-body:has(.person-modal[open]) { overflow: hidden; }
-.person-modal-header, .person-modal-footer { display: flex; justify-content: space-between; align-items: center; flex-shrink: 0; gap: 16px; padding: 20px 26px; }
-.person-modal-header { border-bottom: 1px solid #e5e9f1; }
-.person-modal-header h2 { margin: 6px 0 0; font-size: 22px; font-weight: 700; }
-.person-modal-body { overflow-y: auto; padding: 24px 26px; min-height: 0; }
-.person-modal-body h3 { font-size: 17px; font-weight: 650; margin-bottom: 16px; }
-.person-modal-body p, .person-modal-body summary { font-size: 13px; color: var(--muted); }
-.person-modal-section { margin-top: 24px; padding-top: 24px; border-top: 1px solid #e5e9f1; }
-.person-modal-footer { border-top: 1px solid #e5e9f1; background: #f8f9fc; }
-.person-modal-footer span { font-size: 12px; }
+.person-editor { max-width: 1000px; display: grid; gap: 24px; }
+.person-details-form, .person-page-section { padding: 26px; min-width: 0; }
+.person-editor h2 { font-size: 18px; font-weight: 650; margin-bottom: 18px; overflow-wrap: anywhere; }
+.person-editor p, .person-editor summary { font-size: 13px; color: var(--muted); }
+.page-heading-actions { display: flex; gap: 10px; flex-shrink: 0; }
+.workspace { min-width: 0; }
+.page-heading { gap: 16px; }
+.sidebar button:disabled { opacity: .5; }
+.face-cropper { margin-top: 14px; padding: 20px; border: 1px solid #dce2ed; border-radius: 10px; background: #f8faff; }
+.face-cropper h3 { font-size: 17px; font-weight: 650; }.face-cropper h4 { font-size: 14px; }
+.crop-layout { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 20px; align-items: start; }
+.crop-stage { position: relative; max-width: 100%; overflow: hidden; touch-action: none; user-select: none; background: #172339; }
+.crop-stage > img { width: 100%; height: auto; display: block; pointer-events: none; }
+.crop-selection { position: absolute; border: 2px solid #fff; outline: 1px solid #3459db; box-shadow: 0 0 0 9999px #17233980; cursor: move; }
+.crop-selection-label { position: absolute; top: 0; left: 0; background: #3459db; color: #fff; font-size: 11px; padding: 3px 6px; pointer-events: none; }
+.crop-handle { position: absolute; right: -1px; bottom: -1px; width: 24px; height: 24px; border: 2px solid white; background: #3459db; cursor: nwse-resize; }
+.crop-preview { display: block; width: 160px; height: 160px; object-fit: contain; background: #e9eef8; border-radius: 6px; margin-bottom: 12px; }
+.crop-coordinates { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }.crop-coordinates label { min-width: 0; font-size: 12px; }
+.crop-controls small { display: block; margin: 10px 0; font-size: 11px; color: var(--muted); }.crop-controls .btn { font-size: 12px; }
+.crop-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 10px; }.face-cropper > small { font-size: 12px; color: var(--muted); }
+.crop-queue-label { font-size: 13px; margin-top: 18px; font-weight: 600; }
+@media (max-width: 900px) { .crop-layout { grid-template-columns: minmax(0, 1fr); }.crop-controls { max-width: 320px; } }
 @media (max-width: 600px) {
   .person-list-heading { align-items: flex-start; flex-direction: column; }
-  .person-modal { width: calc(100% - 16px); max-height: calc(100dvh - 16px); }
-  .person-modal-header, .person-modal-body, .person-modal-footer { padding: 18px 16px; }
-  .person-modal .face-grid { grid-template-columns: minmax(0, 1fr); }
+  .person-details-form, .person-page-section { padding: 20px 16px; }
+  .person-editor .face-grid { grid-template-columns: minmax(0, 1fr); }
+  .sidebar { flex-wrap: wrap; }
+  .page-heading { align-items: flex-start; flex-wrap: wrap; }
+  .face-cropper { padding: 14px 10px; }
 }

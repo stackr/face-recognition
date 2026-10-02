@@ -171,7 +171,7 @@ async def upload(
         raise HTTPException(429, "Another upload is in progress")
     async with request.app.state.upload_lock:
         state = await run_in_threadpool(request.app.state.worker.status, camera_id)
-        if state["state"] in {"opening", "running", "draining", "stopping"}:
+        if state["state"] in {"opening", "running", "reconnecting", "draining", "stopping"}:
             raise HTTPException(409, "Stop analysis before uploading")
         directory = settings.video_dir.resolve()
         directory.mkdir(parents=True, exist_ok=True)
@@ -252,6 +252,12 @@ async def preview_frames(request, camera_id, transport=None):
                     break
                 if response.status_code not in {200, 204}:
                     break
+                state = response.headers.get("X-Camera-State")
+                session = response.headers.get("X-Stream-Session")
+                if state in {"stopping", "stopped", "ended", "error", "reconnecting"}:
+                    break
+                if last_frame is not None and session and session != last_frame[0]:
+                    break
                 if response.status_code == 200:
                     identifier = (
                         response.headers.get("X-Stream-Session"),
@@ -275,7 +281,7 @@ async def preview_frames(request, camera_id, transport=None):
 async def preview(camera_id: int, request: Request):
     await run_in_threadpool(preview_access, request, camera_id)
     state = await run_in_threadpool(request.app.state.worker.status, camera_id)
-    if state["state"] not in {"opening", "running", "draining"}:
+    if state["state"] not in {"opening", "running", "draining", "reconnecting"}:
         raise HTTPException(409, "Start camera analysis first")
     request.app.state.viewers.acquire(camera_id)
     return StreamingResponse(

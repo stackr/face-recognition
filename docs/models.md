@@ -87,3 +87,13 @@ SCRFD는 person ROI를 종횡비 유지하여 320×320에 padding하고 RGB `(pi
 얼굴 시험용 [Ultralytics 공개 zidane.jpg](https://github.com/ultralytics/assets/blob/main/im/zidane.jpg)의 SHA256은 `16d73869e3267a7d4ed00de8e860833bd1657c1b252e94c0c348277adc7b6edb`다. 해당 이미지의 제3자 사진 사용권이 라이브러리 코드의 AGPL/MIT에서 자동 허용된다고 해석하지 않는다. 로컬 smoke 시험에만 사용하고 사진·파생 자료를 저장소에 재배포하지 않는다. 자료 성격과 수동 정답의 범위는 [calibration-data.md](calibration-data.md)에 기록한다.
 
 공식 참고: [Ultralytics 라이선스](https://www.ultralytics.com/license), [InsightFace 모델 사용 조건](https://github.com/deepinsight/insightface/blob/master/python-package/docs/model_zoo.md), [ONNX Runtime CUDA 요구 조건](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html).
+
+## Phase 5 RTSP 시험 도구
+
+MediaMTX **v1.21.1 Linux amd64** 공식 바이너리를 localhost RTSP 장애/복구 시험에만 사용한다. AI 모델 가중치는 추가하지 않았다. Docker나 영구 서비스를 설치하지 않으며 `scripts/rtsp_fixture.py`가 공개 `face-smoke.mp4`를 FFmpeg로 송출하고 자신이 만든 프로세스를 종료한다. 시험 도구와 영상은 Git에서 제외한다.
+
+- 출처: [공식 v1.21.1 release](https://github.com/bluenviron/mediamtx/releases/tag/v1.21.1), [Linux amd64 archive](https://github.com/bluenviron/mediamtx/releases/download/v1.21.1/mediamtx_v1.21.1_linux_amd64.tar.gz)
+- archive SHA256: `653abc672a3e693f8d3b2717752492fdcfb8072291ec108d03d3dd857411b0ee`
+- 실행 바이너리 SHA256: `2b45b2999f22c8a1ecd376ce407b6337b68466fdeac54a8fdc448a79f818474f`
+- 사용 조건: 배포 archive에 포함된 MIT License, Copyright (c) 2019 aler9. 고지 원문을 `data/tools/mediamtx/LICENSE`에 함께 보관한다. 복제/배포 시 MIT의 저작권·허가 고지 조건을 유지한다. [공식 LICENSE](https://github.com/bluenviron/mediamtx/blob/v1.21.1/LICENSE)
+- `prepare_phase5.py`는 archive checksum을 검증하고 파일별 hash/source/version을 `data/tools/mediamtx/manifest.json`에 기록한다. fixture는 실행 전 binary SHA256을 다시 확인한다.

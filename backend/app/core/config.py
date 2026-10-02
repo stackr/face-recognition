@@ -52,6 +52,12 @@ class Settings(BaseSettings):
     new_track_threshold: float = Field(default=0.6, ge=0, le=1)
     track_lost_seconds: float = Field(default=3, ge=0.2, le=30)
     max_active_cameras: int = Field(default=4, ge=1, le=16)
+    rtsp_open_timeout_seconds: float = Field(default=5, ge=1, le=15)
+    rtsp_read_timeout_seconds: float = Field(default=3, ge=1, le=10)
+    rtsp_reconnect_initial_seconds: float = Field(default=1, ge=0.1, le=30)
+    rtsp_reconnect_max_seconds: float = Field(default=30, ge=0.1, le=300)
+    rtsp_reconnect_jitter: float = Field(default=0.2, ge=0, le=0.5)
+    rtsp_reconnect_reset_seconds: float = Field(default=10, ge=1, le=300)
     preview_fps: float = Field(default=5, ge=1, le=10)
     preview_viewers_per_camera: int = Field(default=4, ge=1, le=8)
     preview_viewers_total: int = Field(default=16, ge=1, le=32)
@@ -72,6 +78,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def tracker_thresholds(self):
+        if self.rtsp_reconnect_initial_seconds > self.rtsp_reconnect_max_seconds:
+            raise ValueError("RTSP retry maximum must be at least the initial delay")
         if (
             not self.detection_confidence
             <= self.track_low_threshold

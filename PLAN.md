@@ -1000,4 +1000,10 @@ DBCONFIG.md에서 DB 연결 정보 참고해. 해당 내용은 로그, README, .
 
 Phase 4까지 구현 및 native 서비스 반영 완료. 인물/다중 reference 등록, Memory/Qdrant cosine 검색과 인물별 최대 점수, 인증된 이미지·인물 grant·감사 기록, worker cache ACK 및 durable 삭제 재시도, 이미지/특징별 retention cleanup을 제공한다. 단위 테스트 45개, 실제 DB 통합 1개, Chrome E2E 4개와 CUDA 기능 검증을 통과했다. 공개 smoke 자료의 동작 확인이며 정확도 보정/동일인 확정으로 해석하지 않는다. 자세한 내용은 [Phase 4 검증 결과](docs/phase4-report.md)를 참고한다.
 
-다음 구현 범위: Phase 5 — RTSP 자동 재연결/backoff, stream session lifecycle 및 track/cooldown 초기화. MatchEvent/WebSocket과 전체 Live Search UI는 Phase 6~7에서 진행한다.
+Phase 5까지 구현 및 native 서비스 반영 완료. RTSP 연결/읽기 실패 시 제한된 지수 backoff로 자동 재연결하고, 이전 영상·추적·얼굴·검색 후보를 제거한 새 stream session에서 복구한다. 최신 대기 frame 1개를 유지하며 늦게 끝난 이전 session의 추론 결과와 예외를 차단한다. 재시도 중 중지, 인증된 미리보기의 자동 복구 및 재연결 통계를 제공한다. 단위 테스트 54개, 실제 DB 통합 1개, Chrome E2E 5개 및 공개 localhost RTSP를 통한 실제 CUDA 중단/복구 검증을 통과했다. 신규 AI 모델/상용 서비스는 추가하지 않았고 비상업 시험 목적을 유지한다. 자세한 구현·실행 명령·측정 한계는 [Phase 5 검증 결과](docs/phase5-report.md)를 참고한다.
+
+다음 구현 범위: Phase 6 — MatchEvent 저장, 인증된 WebSocket, 이벤트 중복 방지 및 DB 조회를 통한 재연결 복구. 이벤트 cooldown은 이 단계에서 `(camera_id, stream_session_id, track_id, person_id)` 기준으로 구현하여 이전 session에서 새 session으로 이어지지 않게 한다. 전체 Live Search UI는 Phase 7에서 진행한다.
+
+2026-10-03 인물 관리 화면 변경: 인물 추가·수정·조회는 전용 페이지에서 진행한다. 목록은 첫 화면에 유지하고 등록/수정 페이지에서 얼굴 사진 등록·삭제와 사진 시험 비교를 제공한다. 저장 후 수정 URL로 전환하며 새로고침·브라우저 뒤로/앞으로 가기에서 정보를 복원한다. Angular build/TypeScript 및 전체 Chrome E2E 5개를 통과했다.
+
+2026-10-03 얼굴 사진 크롭: 로컬 JPEG/PNG 선택 후 영역 지정·이동·크기 조절·미리보기와 명시적인 얼굴 저장을 제공한다. 인물 생성 전에도 사진을 선택하고 크롭한 얼굴 저장 시 인물을 생성해 연결한다. 사진 저장 실패 시 생성된 인물과 크롭을 유지한다. 좌표/저장 흐름 테스트 5개와 타입 검사·빌드를 통과했으며, Chrome E2E는 현재 실행 환경의 브라우저 제한으로 미검증이다.

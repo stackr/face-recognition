@@ -35,7 +35,7 @@ def main():
         try:
             system = checked(client.get("/api/system/status"))
             report["checked_at"] = system["checked_at"]
-            assert system["phase"] == 4
+            assert system["phase"] >= 4
             face_info = system["worker"]["face_analysis"]
             assert face_info["status"] == "passed" and face_info["actual_device"] == "cuda"
             report["face_device"] = face_info["actual_device"]

@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 class WorkerClient:
     def __init__(self, settings, transport=None):
+        self.settings = settings
         self.client = httpx.Client(
             base_url=settings.worker_url,
             headers={"X-Service-Token": settings.service_token.get_secret_value()},
@@ -56,7 +57,16 @@ class WorkerClient:
         )
 
     def stop(self, camera_id):
-        response = self.request("POST", f"/internal/cameras/{camera_id}/stop", missing_ok=True)
+        response = self.request(
+            "POST",
+            f"/internal/cameras/{camera_id}/stop",
+            missing_ok=True,
+            timeout=max(
+                10,
+                self.settings.rtsp_open_timeout_seconds + 2,
+                self.settings.rtsp_read_timeout_seconds + 2,
+            ),
+        )
         return (
             response.json()
             if response is not None
