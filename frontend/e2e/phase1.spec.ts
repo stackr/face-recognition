@@ -1,0 +1,38 @@
+import { expect, test } from '@playwright/test';
+import { readFileSync, mkdirSync } from 'node:fs';
+
+test('로그인, 실제 서비스 상태 및 카메라 등록·수정·삭제', async ({ page }) => {
+  const credentials = readFileSync('../data/local-admin.txt', 'utf8');
+  const username = credentials.match(/^username: (.+)$/m)![1];
+  const password = credentials.match(/^password: (.+)$/m)![1];
+  const name = `E2E-${Date.now()}`;
+  await page.goto('/');
+  await expect(page.getByText('서버 연결됨')).toBeVisible();
+  await page.getByLabel('아이디', {exact:true}).fill(username);
+  await page.getByLabel('비밀번호', {exact:true}).fill(password);
+  await page.getByRole('button', {name:'로그인',exact:true}).click();
+  await expect(page.getByRole('heading', {name:'시스템 준비 상태'})).toBeVisible();
+  await expect(page.locator('.service-state').filter({hasText:'정상'})).toHaveCount(2);
+  await expect(page.getByText('CUDA 검증 통과')).toBeVisible();
+  mkdirSync('../data/screenshots', {recursive:true});
+  await page.screenshot({path:'../data/screenshots/dashboard.png',fullPage:true});
+  await page.getByRole('button', {name:'카메라 관리 열기'}).click();
+  await page.getByLabel('카메라 이름', {exact:true}).fill(name);
+  await page.getByLabel('위치', {exact:true}).fill('시험 입구');
+  await page.getByLabel('RTSP 주소', {exact:true}).fill('rtsp://e2e:private-credential@127.0.0.1:8554/live');
+  await page.getByRole('button', {name:'카메라 저장'}).click();
+  let row = page.getByRole('row').filter({hasText:name});
+  await expect(row).toBeVisible();
+  await expect(row).not.toContainText('private-credential');
+  await row.getByRole('button', {name:'수정',exact:true}).click();
+  await page.getByLabel('카메라 이름', {exact:true}).fill(`${name}-수정`);
+  await page.getByLabel('RTSP 주소', {exact:true}).fill('rtsp://e2e:private-credential@127.0.0.1:8554/live');
+  await page.getByRole('button', {name:'카메라 저장'}).click();
+  row = page.getByRole('row').filter({hasText:`${name}-수정`});
+  await expect(row).toBeVisible();
+  page.once('dialog', dialog => dialog.accept());
+  await row.getByRole('button', {name:'삭제',exact:true}).click();
+  await expect(row).toHaveCount(0);
+  await page.getByRole('button', {name:'로그아웃'}).click();
+  await expect(page.getByRole('heading', {name:'로그인',exact:true})).toBeVisible();
+});

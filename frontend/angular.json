@@ -1,0 +1,38 @@
+{
+  "$schema": "./node_modules/@angular/cli/lib/config/schema.json",
+  "version": 1,
+  "cli": {"analytics": false},
+  "projects": {
+    "cctv-search": {
+      "projectType": "application",
+      "root": "",
+      "sourceRoot": "src",
+      "architect": {
+        "build": {
+          "builder": "@angular/build:application",
+          "options": {
+            "outputPath": "dist/cctv-search",
+            "index": "src/index.html",
+            "browser": "src/main.ts",
+            "tsConfig": "tsconfig.app.json",
+            "styles": ["node_modules/bootstrap/dist/css/bootstrap.min.css", "src/styles.css"]
+          },
+          "configurations": {
+            "production": {"outputHashing": "all", "budgets": [{"type":"initial","maximumWarning":"1MB","maximumError":"2MB"}]},
+            "development": {"optimization": false, "sourceMap": true}
+          },
+          "defaultConfiguration": "production"
+        },
+        "serve": {
+          "builder": "@angular/build:dev-server",
+          "configurations": {
+            "development": {"buildTarget": "cctv-search:build:development"},
+            "production": {"buildTarget": "cctv-search:build:production"}
+          },
+          "defaultConfiguration": "development"
+        }
+      }
+    }
+  }
+}
+

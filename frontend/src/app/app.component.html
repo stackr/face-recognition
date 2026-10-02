@@ -1,0 +1,77 @@
+<header class="topbar">
+  <div class="container-fluid px-4 d-flex justify-content-between align-items-center">
+    <div class="brand"><span class="brand-mark">◉</span> CCTV Search <span class="environment">비상업 시험 환경</span></div>
+    @if (user(); as account) {
+      <div class="d-flex align-items-center gap-3"><span class="account">{{ account.username }} · {{ account.role }}</span><button class="btn btn-sm btn-outline-light" (click)="logout()">로그아웃</button></div>
+    }
+  </div>
+</header>
+@if (loading()) {
+  <main class="container py-5"><p role="status">접속 상태를 확인하고 있습니다.</p></main>
+} @else if (!user()) {
+  <main class="login-wrap">
+    <section class="login-intro"><div class="eyebrow">CCTV SEARCH</div><h1>카메라와 서비스를<br>한곳에서 관리하세요.</h1><p>시험 환경에 로그인하여 등록된 카메라와<br>시스템 준비 상태를 확인할 수 있습니다.</p><div class="connection"><span class="dot" [class.ok]="backend() === '연결됨'"></span> 서버 {{ backend() }}</div></section>
+    <form class="card login-card" (ngSubmit)="login()">
+      <h2>로그인</h2><p class="text-secondary">발급된 시험 계정으로 접속하세요.</p>
+      @if (error()) {<div class="alert alert-danger" role="alert">{{ error() }}</div>}
+      <label for="username" class="form-label">아이디</label><input id="username" name="username" class="form-control mb-3" [(ngModel)]="username" autocomplete="username" maxlength="64" required>
+      <label for="password" class="form-label">비밀번호</label><input id="password" name="password" type="password" class="form-control mb-4" [(ngModel)]="password" autocomplete="current-password" maxlength="256" required>
+      <button class="btn btn-primary w-100 py-2" type="submit" [disabled]="busy()">{{ busy() ? '로그인 중…' : '로그인' }}</button>
+    </form>
+  </main>
+} @else {
+  <div class="app-layout">
+    <nav class="sidebar" aria-label="주 메뉴"><div class="nav-caption">WORKSPACE</div><button [class.active]="view() === 'dashboard'" (click)="view.set('dashboard')">▦ &nbsp; 대시보드</button><button [class.active]="view() === 'cameras'" (click)="view.set('cameras')">▣ &nbsp; 카메라 관리</button><button [class.active]="view() === 'live'" (click)="view.set('live')">▷ &nbsp; 영상 분석</button><div class="sidebar-note">시험 환경<br><span>사람 탐지 · 카메라별 추적</span></div></nav>
+    <main class="workspace">
+      <div class="page-heading"><div><div class="eyebrow">OVERVIEW</div><h1>{{ view() === 'dashboard' ? '시스템 준비 상태' : view() === 'cameras' ? '카메라 관리' : '영상 분석' }}</h1><p>{{ view() === 'dashboard' ? '서비스 연결과 최근 GPU 검증 결과를 확인하세요.' : view() === 'cameras' ? '시험에 사용할 CCTV와 MP4 카메라를 관리하세요.' : '카메라 영상에서 사람과 이동을 확인하세요.' }}</p></div><button class="btn btn-outline-secondary" (click)="refresh(); refreshAnalysis()">새로고침</button></div>
+      @if (error()) {<div class="alert alert-danger" role="alert">{{ error() }}</div>}
+      @if (notice()) {<div class="alert alert-info" role="status">{{ notice() }}</div>}
+      @if (view() === 'dashboard') {
+        <div class="status-grid">
+          <section class="card status-card"><div class="card-label">DATABASE</div><h2>MariaDB</h2><div class="service-state" [class.success]="status()?.services?.mariadb?.status === 'ok'">{{ serviceLabel(status()?.services?.mariadb?.status) }}</div><p>카메라 · 사용자 정보 저장</p></section>
+          <section class="card status-card"><div class="card-label">VECTOR SEARCH</div><h2>Qdrant</h2><div class="service-state" [class.success]="status()?.services?.qdrant?.status === 'ok'">{{ serviceLabel(status()?.services?.qdrant?.status) }}</div><p>얼굴 벡터 검색 서비스</p></section>
+          <section class="card status-card"><div class="card-label">GPU VALIDATION</div><h2>GPU</h2><div class="service-state" [class.success]="status()?.gpu?.status === 'passed'">{{ gpuLabel() }}</div><p>{{ status()?.gpu?.gpu_name || '검증 결과 대기' }}</p></section>
+        </div>
+        <div class="overview-grid"><section class="card overview-card"><div class="card-label">CAMERAS</div><h2>등록된 카메라</h2><div class="camera-count">{{ cameras().length }}<span>대</span></div><button class="btn btn-primary" (click)="view.set('cameras')">카메라 관리 열기 →</button></section><section class="card overview-card"><div class="card-label">ANALYSIS SERVICE</div><h2>사람 탐지 서비스</h2><p>{{ status()?.worker?.status === 'ok' ? '실행 중' : '서비스 연결 실패' }} · {{ status()?.worker?.detector?.model || '모델 확인 대기' }} · {{ status()?.worker?.detector?.actual_device || '장치 확인 대기' }}</p><p>서비스 연결: {{ status()?.checked_at ? (status()!.checked_at | date:'yyyy-MM-dd HH:mm:ss') : '확인 중' }}</p><p>GPU 검증: {{ status()?.gpu?.checked_at ? (status()!.gpu.checked_at | date:'yyyy-MM-dd HH:mm:ss') : '기록 없음' }}</p><small class="text-secondary">GPU 항목은 마지막으로 저장된 검증 결과입니다.</small></section></div>
+      } @else if (view() === 'cameras') {
+        @if (user()?.role === 'admin') {
+          <form class="card camera-form" (ngSubmit)="saveCamera()"><h2>{{ editingId === null ? '새 카메라 등록' : '카메라 수정' }}</h2><div class="row g-3"><div class="col-md-6"><label for="camera-name" class="form-label">카메라 이름</label><input id="camera-name" name="camera-name" class="form-control" [(ngModel)]="cameraForm.name" maxlength="120" required></div><div class="col-md-6"><label for="location" class="form-label">위치</label><input id="location" name="location" class="form-control" [(ngModel)]="cameraForm.location" maxlength="255"></div><div class="col-md-6"><label for="source-type" class="form-label">입력 유형</label><select id="source-type" name="source-type" class="form-select" [(ngModel)]="cameraForm.source_type"><option value="rtsp">CCTV · RTSP</option><option value="mp4">시험 영상 · MP4</option></select></div>@if (cameraForm.source_type === 'rtsp') {<div class="col-12"><label for="rtsp" class="form-label">RTSP 주소</label><input id="rtsp" name="rtsp" type="password" class="form-control" [(ngModel)]="cameraForm.rtsp_url" placeholder="rtsp://계정:비밀번호@카메라주소/stream" autocomplete="off" maxlength="2048" required><small class="text-secondary">계정 정보는 저장 후 목록에 표시되지 않습니다.</small></div>} @else {<div class="col-12"><small class="text-secondary">등록 후 영상 분석에서 MP4 파일을 업로드하세요.</small></div>}<div class="col-12"><label for="description" class="form-label">설명</label><input id="description" name="description" class="form-control" [(ngModel)]="cameraForm.description" maxlength="1000"></div><div class="col-12 d-flex align-items-center gap-3"><label class="form-check"><input type="checkbox" name="enabled" class="form-check-input" [(ngModel)]="cameraForm.enabled"><span class="form-check-label">사용</span></label><button type="submit" class="btn btn-primary ms-auto" [disabled]="busy()">{{ busy() ? '저장 중…' : '카메라 저장' }}</button>@if (editingId !== null) {<button type="button" class="btn btn-outline-secondary" (click)="cancelEdit()">취소</button>}</div></div></form>
+        }
+        <section class="card camera-list"><div class="d-flex align-items-center justify-content-between"><h2>카메라 목록</h2><span class="badge text-bg-light">{{ cameras().length }}대</span></div>
+          @if (!cameras().length) {<div class="empty-state">등록된 카메라가 없습니다.<br><small>관리자 계정으로 첫 카메라를 등록하세요.</small></div>} @else {
+            <div class="table-responsive"><table class="table align-middle"><thead><tr><th>이름</th><th>위치</th><th>연결 주소</th><th>사용</th><th>영상</th>@if (user()?.role === 'admin') {<th>관리</th>}</tr></thead><tbody>@for (camera of cameras(); track camera.camera_id) {<tr><td class="fw-semibold">{{ camera.name }}</td><td>{{ camera.location || '—' }}</td><td class="camera-url">{{ camera.source_type === 'mp4' ? 'MP4 시험 영상' : camera.rtsp_url }}</td><td><span class="badge" [class.text-bg-success]="camera.enabled" [class.text-bg-secondary]="!camera.enabled">{{ camera.enabled ? '사용' : '중지' }}</span></td><td><button class="btn btn-sm btn-primary" (click)="openLive(camera)">영상 분석</button></td>@if (user()?.role === 'admin') {<td class="text-nowrap"><button class="btn btn-sm btn-outline-secondary me-2" (click)="edit(camera)">수정</button><button class="btn btn-sm btn-outline-danger" (click)="deleteCamera(camera)">삭제</button></td>}</tr>}</tbody></table></div>
+          }
+        </section>
+      } @else {
+        <section class="card analysis-controls">
+          <label for="live-camera" class="form-label">분석할 카메라</label>
+          <select id="live-camera" class="form-select" [ngModel]="selectedCamera()?.camera_id ?? null" (ngModelChange)="selectLive($event)"><option [ngValue]="null" disabled>카메라를 선택하세요</option>@for (camera of cameras(); track camera.camera_id) {<option [ngValue]="camera.camera_id">{{ camera.name }}</option>}</select>
+          @if (selectedCamera(); as camera) {
+            <div class="analysis-actions">
+              <label for="analysis-source" class="form-label mb-0">분석 입력</label><select id="analysis-source" class="form-select source-select" [(ngModel)]="analysisSource" [disabled]="activeAnalysis() || busy()">@if (camera.source_type === 'rtsp') {<option value="rtsp">등록된 CCTV</option>}<option value="mp4" [disabled]="!camera.has_test_video">업로드한 MP4</option></select>
+              @if (analysisSource === 'mp4') {<label class="form-check mb-0"><input type="checkbox" class="form-check-input" [(ngModel)]="loopVideo" [disabled]="activeAnalysis()"><span class="form-check-label">반복 재생</span></label>}
+              @if (user()?.role !== 'viewer') {<button class="btn btn-primary" (click)="startAnalysis()" [disabled]="busy() || activeAnalysis() || !camera.enabled || (analysisSource === 'mp4' && !camera.has_test_video)">분석 시작</button><button class="btn btn-outline-secondary" (click)="stopAnalysis()" [disabled]="busy() || !activeAnalysis()">분석 중지</button>}
+              <span class="analysis-state" [class.running]="analysis()?.state === 'running'">{{ analysisLabel() }}</span>
+            </div>
+            @if (user()?.role === 'admin') {<div class="video-upload"><label for="mp4-upload" class="form-label">시험 MP4 업로드</label><input id="mp4-upload" type="file" accept="video/mp4,.mp4" class="form-control" (change)="uploadVideo($event)" [disabled]="busy() || activeAnalysis()"><small class="text-secondary">200 MB 이하 · CCTV 주소를 유지한 채 시험 영상을 사용할 수 있습니다. 분석을 중지한 후 업로드하세요.</small></div>}
+          }
+          @if (user()?.role === 'admin' && selectedCamera()) {
+            <details class="mt-4"><summary class="text-secondary">다른 계정의 영상 접근 권한</summary><div class="analysis-actions"><label for="permission-user" class="form-label mb-0">계정 아이디</label><input id="permission-user" class="form-control source-select" [(ngModel)]="permissionUsername" maxlength="64"><label class="form-check mb-0"><input type="checkbox" class="form-check-input" [(ngModel)]="permissionOperate"><span class="form-check-label">분석 시작·중지 허용 (operator)</span></label><button class="btn btn-sm btn-outline-primary" (click)="setCameraAccess(true)">접근 허용</button><button class="btn btn-sm btn-outline-danger" (click)="setCameraAccess(false)">접근 해제</button></div></details>
+          }
+        </section>
+        @if (selectedCamera()) {
+          @if (analysisError()) {<div class="alert alert-warning" role="alert">{{ analysisError() }}</div>}
+          <div class="live-grid">
+            <section class="card preview-card"><div class="preview-heading"><h2>{{ selectedCamera()!.name }}</h2>@if (activeAnalysis()) {<button class="btn btn-sm btn-outline-secondary" (click)="reconnectPreview()">미리보기 다시 연결</button>}</div>
+              <div class="preview-screen">
+                @if ((analysis()?.state === 'running' || analysis()?.state === 'draining') && !previewFailed()) {<img [src]="previewUrl()" alt="사람 탐지와 추적 번호가 표시된 카메라 영상" (error)="previewFailed.set(true)">} @else {<div class="preview-placeholder">{{ previewFailed() ? '미리보기 연결이 종료되었습니다. 다시 연결해 주세요.' : analysisLabel() }}<small>분석을 시작하면 영상에 사람 박스와 추적 번호가 표시됩니다.</small></div>}
+              </div><p class="preview-caption">추적 번호는 현재 카메라의 영상 세션 안에서만 유효합니다. 얼굴 인식은 다음 단계에서 추가됩니다.</p>
+            </section>
+            <aside class="card metrics-card"><div class="card-label">LIVE METRICS</div><h2>분석 상태</h2><dl><dt>사람 수</dt><dd>{{ analysis()?.result?.tracks?.length || 0 }}명</dd><dt>입력 해상도</dt><dd>{{ analysis()?.resolution?.join(' × ') || '—' }}</dd><dt>수신 FPS</dt><dd>{{ analysis()?.capture_fps ?? '—' }}</dd><dt>탐지 FPS</dt><dd>{{ analysis()?.detection_fps ?? '—' }}</dd><dt>처리 프레임</dt><dd>{{ analysis()?.processed_frames ?? 0 }}</dd><dt>건너뛴 프레임</dt><dd>{{ analysis()?.dropped_frames ?? 0 }}</dd><dt>처리 지연 P95</dt><dd>{{ analysis()?.latency_p95_ms ?? '—' }} ms</dd></dl><small>2초마다 갱신 · 최신 프레임을 우선 처리합니다. 지연은 서버 수신부터 분석·JPEG 생성까지의 시간입니다.</small></aside>
+          </div>
+        }
+      }
+    </main>
+  </div>
+}
+

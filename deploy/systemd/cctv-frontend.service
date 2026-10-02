@@ -1,0 +1,17 @@
+[Unit]
+Description=CCTV Search Angular development UI
+After=cctv-backend.service
+
+[Service]
+Type=simple
+WorkingDirectory=@PROJECT_ROOT@
+Environment=NG_CLI_ANALYTICS=false
+ExecStart=/usr/bin/env npm --prefix @PROJECT_ROOT@/frontend run start
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
+
