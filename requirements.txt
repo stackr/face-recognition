@@ -17,6 +17,7 @@ torch==2.11.0+cu128
 torchvision==0.26.0+cu128
 ultralytics==8.4.171
 opencv-python==5.0.0.93
+pillow==12.3.0
 lap==0.5.12
 nvidia-ml-py==13.615.71
 pytest==9.1.1

@@ -219,7 +219,9 @@ def test_worker_clears_face_buffers_on_stop_restart_loop_and_end(app_context):
     settings = app_context[2]
     video = settings.video_dir / "face-unit.mp4"
     write_video(video, seconds=1)
-    with TestClient(create_worker(settings, TestDetector(), face_analyzer=StubFaces())) as client:
+    with TestClient(
+        create_worker(settings, TestDetector(), face_analyzer=StubFaces(), enable_gallery=False)
+    ) as client:
         client.headers["X-Service-Token"] = settings.service_token.get_secret_value()
         payload = {"source": str(video), "source_type": "mp4", "loop": True}
         client.post("/internal/cameras/1/start", json=payload)

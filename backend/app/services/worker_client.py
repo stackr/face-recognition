@@ -25,6 +25,24 @@ class WorkerClient:
         if missing_ok and response.status_code == 404:
             return None
         if response.status_code != 200:
+            if path == "/internal/references/analyze" and response.status_code == 422:
+                detail = response.json().get("detail", {})
+                if isinstance(detail, dict) and detail.get("code") in {
+                    "invalid_image",
+                    "image_dimensions_exceeded",
+                    "no_face",
+                    "multiple_faces",
+                    "quality_rejected",
+                }:
+                    quality = detail.get("quality") or {}
+                    raise HTTPException(
+                        422,
+                        {
+                            "code": detail["code"],
+                            "reasons": quality.get("reasons", []),
+                            "quality": quality.get("quality"),
+                        },
+                    )
             code = response.status_code if response.status_code in {404, 409, 422, 429} else 503
             raise HTTPException(code, "Analysis command rejected")
         return response

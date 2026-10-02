@@ -6,6 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import current_user
+from app.api.persons import filter_camera_status
 from app.db.session import get_db
 from app.models import User
 
@@ -14,7 +15,7 @@ router = APIRouter(tags=["System"])
 
 @router.get("/api/health")
 def health():
-    return {"status": "ok", "phase": 3}
+    return {"status": "ok", "phase": 4}
 
 
 @router.get("/api/system/status")
@@ -38,8 +39,12 @@ def system_status(
         worker = request.app.state.worker.request("GET", "/internal/status").json()
         if user.role != "admin":
             worker.pop("cameras", None)
+        else:
+            worker["cameras"] = [
+                filter_camera_status(db, user, state) for state in worker.get("cameras", [])
+            ]
     except Exception:
-        pass
+        worker = {"status": "unavailable"}
     settings = request.app.state.settings
     gpu = {
         "status": "unverified",
@@ -74,7 +79,7 @@ def system_status(
         except (OSError, ValueError):
             gpu["status"] = "invalid_report"
     return {
-        "phase": 3,
+        "phase": 4,
         "checked_at": datetime.now(UTC).isoformat(),
         "services": dependencies,
         "gpu": gpu,

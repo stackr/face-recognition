@@ -57,6 +57,18 @@ class Settings(BaseSettings):
     preview_viewers_total: int = Field(default=16, ge=1, le=32)
     video_upload_max_mb: int = Field(default=200, ge=1, le=1000)
     video_storage_max_mb: int = Field(default=1000, ge=200, le=10000)
+    reference_dir: Path = ROOT / "data/references"
+    reference_upload_max_mb: int = Field(default=10, ge=1, le=20)
+    reference_storage_max_mb: int = Field(default=200, ge=10, le=2000)
+    reference_image_retention_days: int = Field(default=30, ge=1, le=365)
+    reference_embedding_retention_days: int = Field(default=30, ge=1, le=365)
+    reference_cleanup_interval_seconds: int = Field(default=30, ge=1, le=3600)
+    max_target_persons: int = Field(default=100, ge=1, le=1000)
+    reference_faces_per_person: int = Field(default=20, ge=1, le=50)
+    face_search_provider: str = "auto"
+    face_memory_max_references: int = Field(default=200, ge=1, le=2000)
+    face_match_threshold: float = Field(default=0.75, ge=-1, le=1)
+    face_collection: str = Field(default="face_embeddings", pattern=r"^[a-zA-Z0-9_-]{1,80}$")
 
     @model_validator(mode="after")
     def tracker_thresholds(self):
@@ -87,7 +99,14 @@ class Settings(BaseSettings):
             raise ValueError("Worker must use a localhost HTTP URL")
         return value.rstrip("/")
 
-    @field_validator("yolo_model_path", "face_model_dir", "video_dir", "log_dir", "gpu_report_path")
+    @field_validator(
+        "yolo_model_path",
+        "face_model_dir",
+        "reference_dir",
+        "video_dir",
+        "log_dir",
+        "gpu_report_path",
+    )
     @classmethod
     def project_path(cls, value: Path) -> Path:
         return value if value.is_absolute() else ROOT / value
@@ -113,6 +132,13 @@ class Settings(BaseSettings):
     def valid_device(cls, value: str) -> str:
         if value not in {"cuda", "cpu"}:
             raise ValueError("Device must be cuda or cpu")
+        return value
+
+    @field_validator("face_search_provider")
+    @classmethod
+    def search_provider(cls, value):
+        if value not in {"auto", "memory", "qdrant"}:
+            raise ValueError("Face search provider must be auto, memory or qdrant")
         return value
 
     @property

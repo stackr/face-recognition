@@ -31,7 +31,9 @@ def private_video(source, settings):
     return path
 
 
-def create_worker(settings=None, detector=None, *, face_analyzer=None, enable_faces=True):
+def create_worker(
+    settings=None, detector=None, *, face_analyzer=None, enable_faces=True, enable_gallery=True
+):
     settings = settings or Settings()
 
     @asynccontextmanager
@@ -43,12 +45,15 @@ def create_worker(settings=None, detector=None, *, face_analyzer=None, enable_fa
             from app.worker.faces import FaceAnalyzer
 
             active_faces = (face_analyzer or FaceAnalyzer(settings)) if enable_faces else None
+            from app.worker.gallery import ReferenceGallery
+
+            gallery = ReferenceGallery(settings) if enable_gallery else None
         except Exception as exc:
             logging.getLogger("cctv.worker").error(
                 "Detector startup failed; type=%s", type(exc).__name__
             )
             raise
-        app.state.runtime = WorkerRuntime(settings, active_detector, active_faces)
+        app.state.runtime = WorkerRuntime(settings, active_detector, active_faces, gallery)
         logging.getLogger("cctv.worker").info(
             "Worker ready; device=%s model=%s",
             active_detector.info["actual_device"],
@@ -115,6 +120,51 @@ def create_worker(settings=None, detector=None, *, face_analyzer=None, enable_fa
             }
         finally:
             cap.release()
+
+    @app.post("/internal/references/analyze", dependencies=[Depends(authorized)])
+    async def reference(request: Request):
+        from starlette.concurrency import run_in_threadpool
+
+        from app.worker.reference_images import ReferenceRejected
+
+        content = bytearray()
+        async for chunk in request.stream():
+            content.extend(chunk)
+            if len(content) > settings.reference_upload_max_mb * 1024 * 1024:
+                raise HTTPException(413, "Reference image too large")
+        try:
+            return await run_in_threadpool(
+                request.app.state.runtime.analyze_reference, bytes(content)
+            )
+        except ReferenceRejected as exc:
+            return JSONResponse(
+                {"detail": {"code": exc.code, "quality": exc.quality}}, status_code=422
+            )
+        except OverflowError:
+            raise HTTPException(429, "Reference queue full") from None
+        except (RuntimeError, TimeoutError):
+            raise HTTPException(503, "Reference analysis unavailable") from None
+
+    @app.post("/internal/gallery/reload", dependencies=[Depends(authorized)])
+    def reload_gallery(payload: dict, request: Request):
+        gallery = request.app.state.runtime.gallery
+        if gallery is None:
+            raise HTTPException(503, "Gallery unavailable")
+        return gallery.reload(int(payload.get("revision", 0)))
+
+    @app.post("/internal/references/search", dependencies=[Depends(authorized)])
+    def search_reference(payload: dict, request: Request):
+        gallery = request.app.state.runtime.gallery
+        if gallery is None:
+            raise HTTPException(503, "Gallery unavailable")
+        if payload.get("provider") not in {None, "auto", "memory", "qdrant"}:
+            raise HTTPException(422, "Invalid search provider")
+        return gallery.search(
+            payload["embedding"],
+            allowed_person_ids=payload["allowed_person_ids"],
+            provider=payload.get("provider"),
+            limit=10,
+        )
 
     @app.post("/internal/cameras/{camera_id}/start", dependencies=[Depends(authorized)])
     def start(camera_id: int, payload: StartInput, request: Request):

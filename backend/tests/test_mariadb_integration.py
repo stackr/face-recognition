@@ -25,7 +25,7 @@ def test_migrated_mariadb_auth_and_crud():
     with engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "0003_camera_permissions"
+            == "0004_person_faces"
         )
     name = "integration_" + uuid.uuid4().hex[:16]
     password = uuid.uuid4().hex

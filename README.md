@@ -1,8 +1,8 @@
 # CCTV Search
 
-비상업 시험용 CCTV 얼굴 검색 프로젝트. 현재 **Phase 3**까지 구현했다. Ubuntu native 서비스와 Python venv를 사용한다.
+비상업 시험용 CCTV 얼굴 검색 프로젝트. 현재 **Phase 4**까지 구현했다. Ubuntu native 서비스와 Python venv를 사용한다.
 
-로그인/카메라 관리에 더해 MP4 및 기본 RTSP 입력, YOLO11n 사람 탐지, ByteTrack 추적, 인증된 MJPEG 미리보기, 카메라별 영상 접근 권한, 별도 GPU worker와 1채널 benchmark를 사용할 수 있다. SCRFD 얼굴 탐지, 5-point alignment, 품질/자세 평가와 L2 정규화된 512차원 ArcFace 특징을 생성한다. 등록 인물 검색은 Phase 4 구현 대상이다. 전체 요구 사항은 [PLAN.md](PLAN.md), 구현 구성과 후속 설계는 [architecture.md](docs/architecture.md)를 참고한다.
+로그인/카메라 관리에 더해 MP4 및 기본 RTSP 입력, YOLO11n 사람 탐지, ByteTrack 추적, 인증된 MJPEG 미리보기, 카메라별 영상 접근 권한, 별도 GPU worker와 1채널 benchmark를 사용할 수 있다. SCRFD 얼굴 탐지, 5-point alignment, 품질/자세 평가와 L2 정규화된 512차원 ArcFace 특징을 생성한다. 인물·다중 얼굴 등록, Memory/Qdrant cosine 검색, 인증된 등록 이미지와 인물별 권한, 삭제 재시도 및 이미지·특징별 보관 기간 정리를 제공한다. 전체 요구 사항은 [PLAN.md](PLAN.md), 구현 구성과 후속 설계는 [architecture.md](docs/architecture.md)를 참고한다.
 
 ## 현재 실행 환경
 
@@ -108,7 +108,7 @@ GRANT ALL PRIVILEGES ON cctv_search_test.* TO 'cctv_search'@'localhost';
 
 공식 GitHub release의 Linux x86_64 바이너리를 `.tools/qdrant/`에 설치하고 공개된 SHA256을 검증한다. 다운로드 출처와 checksum은 `.tools/qdrant/release.json`에 기록한다. native 설정은 `config/qdrant.yaml`이며 저장 경로는 `data/qdrant/`, HTTP/gRPC는 localhost의 6333/6334다. telemetry는 끈다. `QDRANT_API_KEY`를 설정하면 runner와 client에 함께 적용된다.
 
-서비스가 실행 중일 때 다음 명령은 임의 이름의 임시 collection에서 생성/upsert/query/retrieve/delete를 검증하고 collection을 정리한다. Phase 3에서는 얼굴 특징을 worker 메모리에만 유지하므로 실제 `face_embeddings` collection은 아직 만들지 않는다. 인물 등록과 Qdrant 검색은 Phase 4 범위다.
+서비스가 실행 중일 때 다음 명령은 임의 이름의 임시 collection에서 생성/upsert/query/retrieve/delete를 검증하고 collection을 정리한다. Phase 4는 실제 `face_embeddings` collection에 등록 얼굴을 저장한다. 512차원 cosine과 모델 버전을 collection metadata로 확인하고, 소유자·모델이 다른 기존 collection을 초기화하거나 덮어쓰지 않는다.
 
 ```bash
 .venv/bin/python scripts/check_services.py
@@ -251,7 +251,7 @@ benchmark는 실제 영상 FPS로 재생하며 서버 수신→탐지/추적/JPE
 
 기본값은 track별 최소 0.5초 간격, frame당 최대 4 ROI, camera당 얼굴 cache 최대 100 track이다. 원본 얼굴 최소 변 길이 80px, Laplacian variance 60 이상, 평균 밝기 35~220, yaw/pitch/roll 절대값 최대 40/30/35도 및 품질 0.7 이상을 요구한다. 정렬과 landmark geometry는 가림 가능성을 검사하는 heuristic이며 정확한 가림 classifier로 검증된 것은 아니다. 크기/자세 등의 hard gate에 미달하면 품질 점수가 높아도 ArcFace를 실행하지 않는다.
 
-같은 track에서 통과한 얼굴의 품질이 개선됐을 때만 embedding을 생성한다. 특징은 512차원 float32/L2 normalized이며 버전은 `buffalo_l-v0.7-w600k_r50-4c06341c33c2`다. 벡터는 브라우저/상태 API에 전달하지 않고 worker 메모리에만 유지한다. 중지/오류/EOF/반복/재시작에서 해당 세션의 이미지·특징 cache를 없애고 lost track은 3초 후 만료한다. 썸네일은 인증·카메라 grant와 필수 session ID를 검사하며 public static 경로가 아니다.
+같은 track에서 통과한 얼굴의 품질이 개선됐을 때만 embedding을 생성한다. 특징은 512차원 float32/L2 normalized이며 버전은 `buffalo_l-v0.7-w600k_r50-4c06341c33c2`다. 실시간 track 벡터는 브라우저/상태 API에 전달하지 않고 worker 메모리에만 유지한다. 등록 얼굴 벡터는 Phase 4의 private DB/Qdrant에 저장한다. 중지/오류/EOF/반복/재시작에서 해당 세션의 이미지·특징 cache를 없애고 lost track은 3초 후 만료한다. 썸네일은 인증·카메라 grant와 필수 session ID를 검사하며 public static 경로가 아니다.
 
 ```bash
 .venv/bin/python scripts/check_face_gpu.py
@@ -264,6 +264,33 @@ benchmark는 실제 영상 FPS로 재생하며 서버 수신→탐지/추적/JPE
 benchmark는 입력 1280×720/10 FPS, detector 640, 얼굴 detector 320, 실제 모델 SHA/device와 사람 수·ROI 요청/품질 통과·제외/특징 생성 수, 처리 지연 및 GPU 자원을 기록한다. 측정 중 다른 카메라가 시작되면 중단하고 자신이 만든 임시 카메라만 정리한다. Torch 메모리 수치는 ONNX Runtime allocation을 포함하지 않으므로 NVML 전체 GPU 사용량도 함께 기록한다. `face_analysis_fps`는 ROI를 한 번 이상 검사한 frame/초이고 `face_roi_fps`는 person ROI 검사/초이며 ArcFace 특징 생성 횟수와 구분한다.
 
 [calibration-data.md](docs/calibration-data.md)는 촬영 group 단위 분리, 수동 출현 구간/subject 정답, positive/negative pair의 검증 형식을 설명한다. 준비된 공개 사진·밝기 변형·반복 MP4는 smoke 자료다. 독립 정확도 평가 자료가 없어 검색 threshold 보정과 FAR/FRR은 `unavailable`이다.
+
+## 인물 등록 및 Phase 4 시험
+
+**인물 관리** 첫 화면에는 검색 대상 인물 목록을 표시한다. **인물 추가**를 눌러 모달에서 이름을 입력하고 **인물 저장 → 얼굴 사진 추가** 순서로 등록한다. 저장 후에도 모달을 유지하며 사진 등록과 **사진으로 시험 비교**를 같은 모달 안에서 진행한다. 기존 인물은 목록의 **수정** 버튼으로 모달을 열어 정보와 등록 얼굴을 관리한다. JPEG/PNG 여러 장을 선택하면 한 장씩 처리한다. 사진은 각 10 MB 이하, 가로·세로 4096px 이하, 1200만 픽셀 이하이며 한 사람만 있어야 한다. 기존 얼굴 품질 기준을 적용하고 얼굴 없음·여러 얼굴·품질 미달은 이유를 표시한다. 인물당 기본 최대 20개, 전체 최대 100명이다. 등록 이미지·시험 비교 사진의 원본은 저장하지 않으며, 품질을 통과한 정렬 얼굴 112×112 JPEG만 private `data/references`에 보관한다.
+
+**사진으로 시험 비교**는 admin/operator에게 제공한다. 사용 중이며 해당 계정에 인물 조회 권한이 있는 얼굴만 검색한다. 점수는 한 인물의 여러 등록 얼굴 중 최대 cosine similarity다. 0.75 이상을 `유사도 후보`로 표시하고 아래 점수도 시험 비교 결과에서 구분한다. 확정 신원이나 정확도 보정 결과가 아니다. 영상 분석의 추적별 얼굴에도 같은 후보가 표시되며 이벤트 저장/알림·확인/거부 기능은 후속 Phase 6~7에 구현한다.
+
+관리자는 인물 수정에서 `검색 대상 사용`을 끄거나 인물·얼굴을 삭제할 수 있다. 일반 계정은 목록의 **인물 보기**로 조회 모달을 열며, 인물별 grant가 있어야 정보·사진·후보 이름을 제공한다. `다른 계정의 인물·이미지 접근 권한`에서 사용자 아이디로 허용/해제한다. 카메라 영상 권한과 인물 권한은 각각 검사한다. 이미지 조회는 cookie 인증 API를 사용하며 공개 static URL이 아니다. 등록/수정/삭제/권한/사진 조회/시험 검색/만료 정리를 감사 기록에 남긴다.
+
+등록 얼굴 특징은 512D L2 정규화 후 Fernet 암호화하여 MariaDB에 저장하고 Qdrant private collection에도 반영한다. 암호화 키는 현재 `RTSP_ENCRYPTION_KEY`를 공유하므로 기존 키를 변경하면 재암호화/재등록 절차가 필요하다. Qdrant는 localhost 전용이다. 모델 버전이 다른 특징은 검색에 섞지 않는다. `FACE_SEARCH_PROVIDER=auto`는 등록 얼굴 200개 이하에서 Memory, 초과 시 Qdrant를 사용한다. `memory`/`qdrant`로 고정할 수도 있다. 현재 Qdrant는 모든 유효 reference를 exact 검색 후 같은 인물별 집계 규칙을 적용한다. 큰 규모 ANN 최적화는 후속 범위다.
+
+이미지와 특징은 기본 각각 30일 보관하고 `REFERENCE_IMAGE_RETENTION_DAYS` / `REFERENCE_EMBEDDING_RETENTION_DAYS`로 따로 설정한다. 설정은 새 등록 시 적용한다. 만료 즉시 조회/검색에서 제외하고 기본 30초 cleanup이 파일/vector/DB/cache를 정리한다. 이미지가 먼저 만료되면 특징 검색은 유지할 수 있고, 특징이 먼저 만료되면 아직 유효한 이미지는 조회할 수 있다. `REFERENCE_STORAGE_MAX_MB=200` 및 최소 잔여 디스크 500 MB를 적용한다.
+
+변경 시 DB revision과 durable job을 먼저 commit하고 worker cache ACK, Qdrant 및 파일 정리를 확인한다. 동기화 실패는 `202`와 `반영 재시도 중` 상태로 표시하며 자동 backoff 또는 **반영 재시도**로 처리한다. 삭제·비활성화·만료 대상은 작업 실패 중에도 SQL 기준으로 검색에서 제외한다. 여러 저장소 작업을 하나의 원자적 transaction으로 취급하지 않는다. 프로세스가 파일 생성 후 DB commit 전에 종료해서 남긴 파일은 1시간의 유예 후 cleanup이 정리한다. 완료된 maintenance job은 7일 뒤 삭제하며 감사 기록은 유지한다.
+
+기존 설치에서는 아래 순서로 schema와 서비스를 갱신한다. 재시작 스크립트는 실행 중이던 카메라만 재개하고 중지 카메라와 등록 설정을 유지한다.
+
+```bash
+.venv/bin/alembic -c backend/alembic.ini upgrade head
+.venv/bin/python scripts/restart_analysis.py
+# 공개 smoke 사진으로 임시 인물/MP4를 만들고 끝난 후 자신이 만든 데이터만 삭제
+.venv/bin/python scripts/check_phase4.py
+cd frontend
+npx playwright test
+```
+
+검증 범위와 한계는 [phase4-report.md](docs/phase4-report.md)를 참고한다. RTSP 자동 재연결/backoff는 다음 Phase 5 범위다.
 
 ## Troubleshooting
 

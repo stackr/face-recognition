@@ -994,3 +994,10 @@ Troubleshooting
 우선 Phase 1까지만 구현하고 테스트한 후 현재 상태와 다음 단계에서 수행할 작업을 보고해라.
 DBCONFIG.md에서 DB 연결 정보 참고해. 해당 내용은 로그, README, .env.example 또는 commit에 노출하지 않는다.
 연결 정보가 가리키는 기존 database와 시험용 schema를 확인하고, migration 및 test가 기존 데이터를 초기화하지 않도록 한다.
+
+
+## 구현 진행 기록 (2026-10-02)
+
+Phase 4까지 구현 및 native 서비스 반영 완료. 인물/다중 reference 등록, Memory/Qdrant cosine 검색과 인물별 최대 점수, 인증된 이미지·인물 grant·감사 기록, worker cache ACK 및 durable 삭제 재시도, 이미지/특징별 retention cleanup을 제공한다. 단위 테스트 45개, 실제 DB 통합 1개, Chrome E2E 4개와 CUDA 기능 검증을 통과했다. 공개 smoke 자료의 동작 확인이며 정확도 보정/동일인 확정으로 해석하지 않는다. 자세한 내용은 [Phase 4 검증 결과](docs/phase4-report.md)를 참고한다.
+
+다음 구현 범위: Phase 5 — RTSP 자동 재연결/backoff, stream session lifecycle 및 track/cooldown 초기화. MatchEvent/WebSocket과 전체 Live Search UI는 Phase 6~7에서 진행한다.

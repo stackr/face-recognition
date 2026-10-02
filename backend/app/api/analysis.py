@@ -16,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.cameras import find_camera, output, save
 from app.api.dependencies import admin_user, current_user, operator_user
+from app.api.persons import filter_camera_status
 from app.db.session import get_db
 from app.models import AuditLog, CameraPermission, User
 from app.services.camera_operations import camera_mutation
@@ -92,7 +93,7 @@ def status(
 ):
     find_camera(camera_id, db)
     camera_access(db, user, camera_id)
-    return request.app.state.worker.status(camera_id)
+    return filter_camera_status(db, user, request.app.state.worker.status(camera_id))
 
 
 @router.post("/{camera_id}/start", dependencies=[Depends(camera_mutation)])

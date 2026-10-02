@@ -8,17 +8,23 @@ from fastapi.responses import JSONResponse
 from qdrant_client import QdrantClient
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.api import analysis, auth, cameras, system
+from app.api import analysis, auth, cameras, persons, system
 from app.core.config import Settings
 from app.core.logging import configure_logging
 from app.core.security import LoginLimiter
 from app.db.session import make_engine
 from app.services.camera_operations import CameraOperations
+from app.services.references import ReferenceService
 from app.services.worker_client import ViewerLimits, WorkerClient
 
 
 def create_app(
-    settings: Settings | None = None, engine=None, vector_client=None, worker_transport=None
+    settings: Settings | None = None,
+    engine=None,
+    vector_client=None,
+    worker_transport=None,
+    *,
+    start_cleanup=True,
 ) -> FastAPI:
     settings = settings or Settings()
     engine = engine if engine is not None else make_engine(settings)
@@ -36,19 +42,24 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         configure_logging(settings.log_dir)
-        logging.getLogger("cctv").info("API started; phase=3")
+        logging.getLogger("cctv").info("API started; phase=4")
+        if start_cleanup:
+            app.state.references.start()
         yield
+        app.state.references.close()
         vector_client.close()
         app.state.worker.client.close()
         engine.dispose()
 
-    app = FastAPI(title="CCTV Search", version="0.3.0", lifespan=lifespan)
+    app = FastAPI(title="CCTV Search", version="0.4.0", lifespan=lifespan)
     app.state.settings, app.state.engine = settings, engine
     app.state.qdrant, app.state.login_limiter = vector_client, LoginLimiter()
     app.state.worker = WorkerClient(settings, worker_transport)
     app.state.viewers = ViewerLimits(settings)
     app.state.upload_lock = asyncio.Lock()
+    app.state.reference_upload_lock = asyncio.Lock()
     app.state.camera_operations = CameraOperations()
+    app.state.references = ReferenceService(settings, engine, vector_client, app.state.worker)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -85,6 +96,7 @@ def create_app(
     app.include_router(auth.router)
     app.include_router(cameras.router)
     app.include_router(analysis.router)
+    app.include_router(persons.router)
     app.include_router(system.router)
     return app
 

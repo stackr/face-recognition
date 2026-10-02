@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, inject, signal, OnDestroy } from '@angular/core';
+import { Component, ElementRef, inject, signal, OnDestroy, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { timeout } from 'rxjs';
 
@@ -12,10 +12,15 @@ interface Camera {
   source_type: 'rtsp' | 'mp4'; has_test_video: boolean;
 }
 interface CameraForm { name: string; description: string; rtsp_url: string; location: string; enabled: boolean; source_type: 'rtsp' | 'mp4'; }
+interface Match {person_id: number; name: string; face_id: number; similarity: number; candidate?: boolean;}
+interface ReferenceFace {id: number; quality: number; state: string; image_available: boolean; image_expires_at: string; embedding_expires_at: string;}
+interface Person {id: number; name: string; description: string; enabled: boolean; sync_status: string; faces: ReferenceFace[];}
+interface SearchResult {matches: Match[]; threshold: number;}
 interface FaceStatus {
   status: string; quality: number; reasons: string[]; embedding_ready: boolean;
   face_size?: number[]; blur_score?: number; brightness?: number; yaw?: number; pitch?: number; roll?: number;
   best?: {quality: number; frame_id: number; captured_at: string; model_version: string};
+  matches?: Match[];
 }
 interface AnalysisTrack {track_id: number; confidence: number; face?: FaceStatus;}
 interface AnalysisStatus {
@@ -42,9 +47,17 @@ export class AppComponent implements OnDestroy {
   loading = signal(true);
   busy = signal(false);
   backend = signal('확인 중');
-  view = signal<'dashboard' | 'cameras' | 'live'>('dashboard');
+  view = signal<'dashboard' | 'cameras' | 'persons' | 'live'>('dashboard');
   status = signal<SystemStatus | null>(null);
   cameras = signal<Camera[]>([]);
+  persons = signal<Person[]>([]);
+  selectedPerson = signal<Person | null>(null);
+  personModalOpen = signal(false);
+  @ViewChild('personDialog') private personDialog?: ElementRef<HTMLDialogElement>;
+  personForm = {name: '', description: '', enabled: true};
+  personEditingId: number | null = null;
+  personPermissionUsername = '';
+  searchResult = signal<SearchResult | null>(null);
   error = signal('');
   notice = signal('');
   username = '';
@@ -96,7 +109,7 @@ export class AppComponent implements OnDestroy {
     });
   }
 
-  clearSession() { this.user.set(null); this.csrf = ''; this.cameras.set([]); this.status.set(null); this.selectedCamera.set(null); this.analysis.set(null); this.error.set(''); this.notice.set(''); }
+  clearSession() { this.personDialog?.nativeElement.close(); this.resetPersonModal(); this.user.set(null); this.csrf = ''; this.cameras.set([]); this.persons.set([]); this.status.set(null); this.selectedCamera.set(null); this.analysis.set(null); this.error.set(''); this.notice.set(''); }
 
   handleError(err: HttpErrorResponse) {
     if (err.status === 401) { this.clearSession(); this.error.set('세션이 만료되었습니다. 다시 로그인해 주세요.'); }
@@ -105,6 +118,7 @@ export class AppComponent implements OnDestroy {
 
   refresh() {
     this.error.set('');
+    this.refreshPersons();
     this.http.get<SystemStatus>('/api/system/status').pipe(timeout(8000)).subscribe({
       next: value => this.status.set(value), error: err => this.handleError(err)
     });
@@ -118,6 +132,118 @@ export class AppComponent implements OnDestroy {
         }
       }, error: err => this.handleError(err)
     });
+  }
+
+  refreshPersons() {
+    this.http.get<Person[]>('/api/persons').subscribe({next: value => {
+      this.persons.set(value);
+      const selected = this.selectedPerson();
+      if (selected) this.selectedPerson.set(value.find(person => person.id === selected.id) || null);
+    }, error: err => this.handleError(err)});
+  }
+  openPersonModal(person: Person | null = null) {
+    if (this.busy()) return;
+    this.resetPersonModal();
+    if (person) {
+      this.selectedPerson.set(person); this.personEditingId = person.id;
+      this.personForm = {name: person.name, description: person.description, enabled: person.enabled};
+    }
+    this.error.set(''); this.notice.set('');
+    this.personModalOpen.set(true);
+    this.personDialog?.nativeElement.showModal();
+  }
+  closePersonModal() {
+    if (this.busy()) return;
+    this.personDialog?.nativeElement.close();
+    this.resetPersonModal();
+    this.error.set(''); this.notice.set('');
+  }
+  cancelPersonModal(event: Event) {
+    event.preventDefault();
+    this.closePersonModal();
+  }
+  resetPersonModal() {
+    this.personModalOpen.set(false); this.selectedPerson.set(null); this.personEditingId = null;
+    this.personForm = {name: '', description: '', enabled: true};
+    this.personPermissionUsername = ''; this.searchResult.set(null);
+  }
+  savePerson() {
+    if (this.busy()) return;
+    if (!this.personForm.name.trim()) { this.error.set('인물 이름을 입력해 주세요.'); return; }
+    this.busy.set(true); this.error.set('');
+    const request = this.personEditingId === null
+      ? this.http.post<Person>('/api/persons', this.personForm, {headers: this.headers()})
+      : this.http.put<Person>(`/api/persons/${this.personEditingId}`, this.personForm, {headers: this.headers()});
+    request.pipe(timeout(30000)).subscribe({next: person => {
+      this.busy.set(false); this.selectedPerson.set(person); this.personEditingId = person.id;
+      this.personForm = {name: person.name, description: person.description, enabled: person.enabled};
+      this.searchResult.set(null); this.refreshPersons();
+      this.notice.set(person.sync_status === 'pending' ? '정보를 저장했습니다. 검색 반영을 재시도 중입니다.' : '인물 정보를 저장했습니다. 얼굴 사진을 추가하세요.');
+    }, error: err => { this.busy.set(false); this.handleError(err); }});
+  }
+  deletePerson(person: Person) {
+    if (this.busy() || !window.confirm(`“${person.name}” 인물과 등록 얼굴을 삭제할까요?`)) return;
+    this.busy.set(true);
+    this.http.delete(`/api/persons/${person.id}`, {headers: this.headers(), observe: 'response'}).subscribe({next: response => {
+      this.busy.set(false); this.closePersonModal(); this.refreshPersons();
+      this.notice.set(response.status === 202 ? '검색에서 제외했습니다. 저장소 삭제를 재시도 중입니다.' : '인물과 등록 얼굴을 삭제했습니다.');
+    }, error: err => {this.busy.set(false); this.handleError(err);}});
+  }
+  referenceUrl(person: Person, face: ReferenceFace) {return `/api/persons/${person.id}/faces/${face.id}/image`;}
+  referenceError(err: HttpErrorResponse) {
+    const labels: Record<string,string> = {no_face:'얼굴을 찾지 못했습니다. 얼굴이 선명한 사진을 선택해 주세요.', multiple_faces:'여러 얼굴이 보입니다. 한 사람만 있는 사진을 선택해 주세요.', quality_rejected:'얼굴 품질 기준을 통과하지 못했습니다. 크고 선명한 정면 사진을 선택해 주세요.', invalid_image:'읽을 수 없는 이미지입니다. JPEG 또는 PNG 파일을 선택해 주세요.', image_dimensions_exceeded:'사진은 가로·세로 4096 px 이하, 1200만 픽셀 이하로 선택해 주세요.'};
+    if (labels[err.error?.detail?.code]) this.error.set(labels[err.error.detail.code]);
+    else if (err.status === 413) this.error.set('사진은 10 MB 이하로 선택해 주세요.');
+    else if (err.status === 429) this.error.set('다른 사진을 처리 중입니다. 잠시 후 다시 시도해 주세요.');
+    else this.handleError(err);
+  }
+  async uploadReferences(event: Event) {
+    const input = event.target as HTMLInputElement, person = this.selectedPerson();
+    const files = Array.from(input.files || []);
+    if (!person || !files.length || this.busy()) return;
+    this.busy.set(true); this.error.set(''); this.notice.set('');
+    let saved = 0;
+    for (const file of files) {
+      if (!['image/jpeg','image/png'].includes(file.type) || file.size > 10 * 1024**2) {
+        this.error.set('10 MB 이하 JPEG 또는 PNG 사진을 선택해 주세요.'); break;
+      }
+      try {
+        await new Promise<void>((resolve, reject) => this.http.post(`/api/persons/${person.id}/faces`, file,
+          {headers:{...this.headers(),'Content-Type':file.type}}).pipe(timeout(45000)).subscribe({next: () => resolve(), error: reject}));
+        saved++;
+      } catch (err) {this.referenceError(err as HttpErrorResponse); break;}
+    }
+    this.busy.set(false); input.value = ''; this.refreshPersons(); this.searchResult.set(null);
+    if (saved) this.notice.set(`${saved}개 얼굴 사진을 저장했습니다. 검색 반영 상태를 확인하세요.`);
+  }
+  deleteReference(person: Person, face: ReferenceFace) {
+    if (this.busy() || !window.confirm('이 등록 얼굴을 삭제할까요?')) return;
+    this.busy.set(true); this.error.set('');
+    this.http.delete(`/api/persons/${person.id}/faces/${face.id}`, {headers:this.headers(), observe:'response'}).subscribe({next: response => {
+      this.busy.set(false); this.refreshPersons(); this.searchResult.set(null); this.notice.set(response.status === 202 ? '검색에서 제외했습니다. 삭제를 재시도 중입니다.' : '등록 얼굴을 삭제했습니다.');
+    }, error: err => { this.busy.set(false); this.handleError(err); }});
+  }
+  searchReference(event: Event) {
+    const input = event.target as HTMLInputElement, file = input.files?.[0];
+    if (!file || this.busy()) return;
+    this.busy.set(true); this.error.set(''); this.notice.set(''); this.searchResult.set(null);
+    this.http.post<SearchResult>('/api/persons/search', file, {headers:{...this.headers(),'Content-Type':file.type}}).pipe(timeout(30000)).subscribe({
+      next: result => {this.searchResult.set(result); this.busy.set(false); input.value='';},
+      error: err => {this.busy.set(false); this.referenceError(err); input.value='';}
+    });
+  }
+  setPersonAccess(canView: boolean) {
+    const person = this.selectedPerson(); if (!person || !this.personPermissionUsername.trim() || this.busy()) return;
+    this.busy.set(true); this.error.set('');
+    this.http.put(`/api/persons/${person.id}/access`, {username:this.personPermissionUsername.trim(),can_view:canView}, {headers:this.headers()}).subscribe({next: () => {
+      this.busy.set(false); this.notice.set(canView ? '인물 정보와 얼굴 사진 접근을 허용했습니다.' : '인물 접근 권한을 해제했습니다.'); this.personPermissionUsername='';
+    }, error: err => {this.busy.set(false); this.handleError(err);}});
+  }
+  retryReferences() {
+    this.busy.set(true);
+    this.http.post<{pending:number}>('/api/persons/maintenance/retry', {}, {headers:this.headers()}).pipe(timeout(60000)).subscribe({next: result => {
+      this.busy.set(false); this.refreshPersons(); this.notice.set(result.pending ? `${result.pending}건의 검색 반영·삭제 작업을 재시도 중입니다.` : '등록 및 삭제 작업을 반영했습니다.');
+    }, error: err => {this.busy.set(false); this.handleError(err);}});
   }
 
   edit(camera: Camera) {

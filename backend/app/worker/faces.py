@@ -1,4 +1,4 @@
-"""Ephemeral per-track face quality and best-face storage; no identity matching."""
+"""Ephemeral track faces and reference candidate comparisons."""
 
 import threading
 from collections import Counter
@@ -162,6 +162,19 @@ class FaceAnalyzer:
     def embed(self, aligned):
         return self.models.embed(aligned)
 
+    def inspect_reference(self, image):
+        detected = self.models.detect(image)
+        if len(detected) != 1:
+            code = "no_face" if not detected else "multiple_faces"
+            return FaceCandidate({"status": code, "reasons": [code], "quality": 0})
+        face = detected[0]
+        pose = (
+            self.models.pose(image, face["bbox"])
+            if min(face["bbox"][2:] - face["bbox"][:2]) >= self.settings.face_min_size
+            else None
+        )
+        return quality(image, face, self.settings, pose)
+
 
 class TrackFaces:
     def __init__(self, settings):
@@ -278,6 +291,29 @@ class TrackFaces:
                 return None
             best = state["best"]
             return best["jpeg"] if best and best["stream_session_id"] == session else None
+
+    def match(self, gallery, tracks):
+        key, _ = gallery.snapshot()
+        with self.lock:
+            for track in tracks:
+                state = self.tracks.get(track["track_id"])
+                best = state["best"] if state else None
+                face = track.get("face")
+                if not best or face is None:
+                    continue
+                match_key = (key, best["frame_id"])
+                if state.get("match_key") != match_key:
+                    result = gallery.search(
+                        best["embedding"], limit=self.settings.max_target_persons
+                    )
+                    state["matches"] = [
+                        item
+                        for item in result["matches"]
+                        if item["similarity"] >= result["threshold"]
+                    ]
+                    state["match_key"] = match_key
+                face["matches"] = state["matches"]
+        return key[0]
 
     def size(self):
         with self.lock:

@@ -4,8 +4,10 @@ import threading
 import time
 import uuid
 from collections import Counter, OrderedDict, deque
+from concurrent.futures import Future
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from queue import Empty, Full, Queue
 
 import cv2
 import numpy as np
@@ -175,9 +177,11 @@ class CameraRun:
 
 
 class WorkerRuntime:
-    def __init__(self, settings, detector, face_analyzer=None):
+    def __init__(self, settings, detector, face_analyzer=None, gallery=None):
         self.settings, self.detector = settings, detector
         self.face_analyzer = face_analyzer
+        self.gallery = gallery
+        self.commands = Queue(maxsize=2)
         self.lock = threading.RLock()
         self.runs = OrderedDict()
         self.cancel = threading.Event()
@@ -229,6 +233,18 @@ class WorkerRuntime:
 
     def schedule(self):
         while not self.cancel.is_set():
+            try:
+                future, content = self.commands.get_nowait()
+            except Empty:
+                pass
+            else:
+                if future.set_running_or_notify_cancel():
+                    try:
+                        from app.worker.reference_images import analyze_reference
+
+                        future.set_result(analyze_reference(self.face_analyzer, content))
+                    except Exception as exc:
+                        future.set_exception(exc)
             with self.lock:
                 runs = list(self.runs.values())
             for run in runs:
@@ -262,6 +278,18 @@ class WorkerRuntime:
                     face_counts = Counter()
                     if self.face_analyzer is not None:
                         face_counts = faces.process(self.face_analyzer, frame, tracks, live_ids)
+                    gallery_revision = None
+                    search_status = "disabled"
+                    if self.gallery is not None:
+                        try:
+                            gallery_revision = faces.match(self.gallery, tracks)
+                            search_status = "ready"
+                        except Exception as exc:
+                            # Reference-store outages must not stop camera analysis.
+                            search_status = "unavailable"
+                            logging.getLogger("cctv.worker").warning(
+                                "Reference search failed; type=%s", type(exc).__name__
+                            )
                     face_ms = (time.monotonic() - face_start) * 1000
                     annotated = frame.image.copy()
                     for track in tracks:
@@ -312,6 +340,8 @@ class WorkerRuntime:
                             "frame_id": frame.frame_id,
                             "captured_at": frame.captured_at,
                             "tracks": tracks,
+                            "gallery_revision": gallery_revision,
+                            "search_status": search_status,
                         }
                         run.processed += 1
                         run.face_counts.update(face_counts)
@@ -329,6 +359,20 @@ class WorkerRuntime:
                     run.fail("inference_failed")
             self.cancel.wait(0.005)
 
+    def analyze_reference(self, content):
+        if self.face_analyzer is None or self.cancel.is_set():
+            raise RuntimeError("Face analysis unavailable")
+        future = Future()
+        try:
+            self.commands.put_nowait((future, content))
+        except Full:
+            raise OverflowError("Reference queue full") from None
+        try:
+            return future.result(timeout=8)
+        except TimeoutError:
+            future.cancel()
+            raise
+
     def close(self):
         self.cancel.set()
         with self.lock:
@@ -339,3 +383,8 @@ class WorkerRuntime:
             except TimeoutError:
                 pass
         self.scheduler.join(timeout=10)
+        while not self.commands.empty():
+            future, _ = self.commands.get_nowait()
+            future.cancel()
+        if self.gallery:
+            self.gallery.close()
