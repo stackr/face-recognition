@@ -3,13 +3,14 @@ import os
 import threading
 import time
 import uuid
-from collections import OrderedDict, deque
+from collections import Counter, OrderedDict, deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import cv2
 import numpy as np
 
+from app.worker.faces import TrackFaces
 from app.worker.tracker import CameraTracker
 
 ACTIVE = {"opening", "running", "draining", "stopping"}
@@ -32,6 +33,7 @@ class CameraRun:
         self.cancel = threading.Event()
         self.stream_session_id = uuid.uuid4().hex
         self.tracker = None
+        self.faces = None
         self.latest = None
         self.jpeg = None
         self.result = None
@@ -45,6 +47,8 @@ class CameraRun:
         self.resolution = None
         self.latencies = deque(maxlen=600)
         self.detection_ms = deque(maxlen=600)
+        self.face_counts = Counter()
+        self.face_ms = deque(maxlen=600)
         self.max_people = 0
         self.thread = threading.Thread(
             target=self.capture, daemon=True, name=f"capture-{camera_id}"
@@ -83,7 +87,7 @@ class CameraRun:
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         with self.lock:
                             self.stream_session_id = uuid.uuid4().hex
-                            self.tracker = None
+                            self.tracker = self.faces = None
                             self.latest = self.jpeg = self.result = None
                             self.loops += 1
                         origin, index = time.monotonic(), 0
@@ -125,7 +129,7 @@ class CameraRun:
     def fail(self, code):
         with self.lock:
             self.state, self.error_code = "error", code
-            self.latest = self.jpeg = self.result = self.tracker = None
+            self.latest = self.jpeg = self.result = self.tracker = self.faces = None
             self.ended_mono = time.monotonic()
         self.cancel.set()
         logging.getLogger("cctv.worker").warning("Camera %s failed; code=%s", self.camera_id, code)
@@ -150,7 +154,11 @@ class CameraRun:
                 "pending_frames": int(self.latest is not None),
                 "capture_fps": round(self.captured / elapsed, 2),
                 "detection_fps": round(self.processed / elapsed, 2),
-                "face_analysis_fps": 0,
+                "face_analysis_fps": round(self.face_counts["analysis_frames"] / elapsed, 2),
+                "face_roi_fps": round(self.face_counts["roi_attempts"] / elapsed, 2),
+                "face_counts": dict(self.face_counts),
+                "face_cache_tracks": self.faces.size() if self.faces else 0,
+                "face_mean_ms": round(float(np.mean(self.face_ms)), 2) if self.face_ms else None,
                 "max_people": self.max_people,
                 "latency_mean_ms": round(float(np.mean(self.latencies)), 2)
                 if self.latencies
@@ -167,8 +175,9 @@ class CameraRun:
 
 
 class WorkerRuntime:
-    def __init__(self, settings, detector):
+    def __init__(self, settings, detector, face_analyzer=None):
         self.settings, self.detector = settings, detector
+        self.face_analyzer = face_analyzer
         self.lock = threading.RLock()
         self.runs = OrderedDict()
         self.cancel = threading.Event()
@@ -214,7 +223,7 @@ class WorkerRuntime:
         with run.lock:
             run.state = "stopped"
             run.ended_mono = run.ended_mono or time.monotonic()
-            run.latest = run.jpeg = run.result = run.tracker = None
+            run.latest = run.jpeg = run.result = run.tracker = run.faces = None
             run.source = ""
         return run.status()
 
@@ -229,7 +238,7 @@ class WorkerRuntime:
                     if run.state == "draining" and run.latest is None:
                         run.state = "ended"
                         run.ended_mono = time.monotonic()
-                        run.jpeg = run.result = run.tracker = None
+                        run.jpeg = run.result = run.tracker = run.faces = None
                         continue
                     if run.latest is None or time.monotonic() < run.next_due:
                         continue
@@ -245,40 +254,58 @@ class WorkerRuntime:
                         if run.tracker is None:
                             run.tracker = CameraTracker(self.settings)
                         tracks = run.tracker.update(boxes, frame.image, frame.captured_mono)
-                        annotated = frame.image.copy()
-                        for track in tracks:
-                            x1, y1, x2, y2 = map(int, track["bbox"])
-                            cv2.rectangle(annotated, (x1, y1), (x2, y2), (80, 230, 120), 2)
-                            cv2.putText(
-                                annotated,
-                                f"person #{track['track_id']} {track['confidence']:.2f}",
-                                (max(0, x1), max(20, y1 - 8)),
-                                cv2.FONT_HERSHEY_SIMPLEX,
-                                0.6,
-                                (80, 230, 120),
-                                2,
-                            )
-                        label = f"cam {run.camera_id} | {frame.stream_session_id[:8]} | frame {frame.frame_id} | {frame.captured_at}"
+                        if run.faces is None:
+                            run.faces = TrackFaces(self.settings)
+                        faces = run.faces
+                        live_ids = run.tracker.live_ids()
+                    face_start = time.monotonic()
+                    face_counts = Counter()
+                    if self.face_analyzer is not None:
+                        face_counts = faces.process(self.face_analyzer, frame, tracks, live_ids)
+                    face_ms = (time.monotonic() - face_start) * 1000
+                    annotated = frame.image.copy()
+                    for track in tracks:
+                        x1, y1, x2, y2 = map(int, track["bbox"])
+                        cv2.rectangle(annotated, (x1, y1), (x2, y2), (80, 230, 120), 2)
                         cv2.putText(
                             annotated,
-                            label,
-                            (12, 24),
+                            f"person #{track['track_id']} {track['confidence']:.2f}",
+                            (max(0, x1), max(20, y1 - 8)),
                             cv2.FONT_HERSHEY_SIMPLEX,
-                            0.45,
-                            (255, 255, 255),
-                            1,
+                            0.6,
+                            (80, 230, 120),
+                            2,
                         )
-                        # Bound encoding cost and memory even for a 4K capture.
-                        if annotated.shape[1] > 1280:
-                            annotated = cv2.resize(
-                                annotated,
-                                (1280, round(annotated.shape[0] * 1280 / annotated.shape[1])),
+                        face = track.get("face", {})
+                        if face.get("bbox") and face.get("frame_id") == frame.frame_id:
+                            fx1, fy1, fx2, fy2 = map(int, face["bbox"])
+                            color = (
+                                (100, 220, 255) if face["status"] == "accepted" else (100, 130, 220)
                             )
-                        ok, encoded = cv2.imencode(
-                            ".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80]
+                            cv2.rectangle(annotated, (fx1, fy1), (fx2, fy2), color, 2)
+                            for px, py in face.get("landmarks", []):
+                                cv2.circle(annotated, (round(px), round(py)), 2, color, -1)
+                    label = f"cam {run.camera_id} | {frame.stream_session_id[:8]} | frame {frame.frame_id} | {frame.captured_at}"
+                    cv2.putText(
+                        annotated,
+                        label,
+                        (12, 24),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.45,
+                        (255, 255, 255),
+                        1,
+                    )
+                    if annotated.shape[1] > 1280:
+                        annotated = cv2.resize(
+                            annotated, (1280, round(annotated.shape[0] * 1280 / annotated.shape[1]))
                         )
-                        if not ok:
-                            raise RuntimeError("JPEG encoding failed")
+                    ok, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    if not ok:
+                        raise RuntimeError("JPEG encoding failed")
+                    with run.lock:
+                        # Stop/EOF/loop can happen during inference; never publish stale faces.
+                        if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
+                            continue
                         run.jpeg = encoded.tobytes()
                         run.result = {
                             "stream_session_id": frame.stream_session_id,
@@ -287,6 +314,9 @@ class WorkerRuntime:
                             "tracks": tracks,
                         }
                         run.processed += 1
+                        run.face_counts.update(face_counts)
+                        if face_counts["analysis_frames"]:
+                            run.face_ms.append(face_ms)
                         run.max_people = max(run.max_people, len(tracks))
                         run.detection_ms.append(detection_ms)
                         run.latencies.append((time.monotonic() - frame.captured_mono) * 1000)

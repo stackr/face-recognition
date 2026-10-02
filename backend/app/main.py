@@ -36,13 +36,13 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         configure_logging(settings.log_dir)
-        logging.getLogger("cctv").info("API started; phase=2")
+        logging.getLogger("cctv").info("API started; phase=3")
         yield
         vector_client.close()
         app.state.worker.client.close()
         engine.dispose()
 
-    app = FastAPI(title="CCTV Search", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="CCTV Search", version="0.3.0", lifespan=lifespan)
     app.state.settings, app.state.engine = settings, engine
     app.state.qdrant, app.state.login_limiter = vector_client, LoginLimiter()
     app.state.worker = WorkerClient(settings, worker_transport)

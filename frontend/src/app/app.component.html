@@ -65,10 +65,28 @@
             <section class="card preview-card"><div class="preview-heading"><h2>{{ selectedCamera()!.name }}</h2>@if (activeAnalysis()) {<button class="btn btn-sm btn-outline-secondary" (click)="reconnectPreview()">미리보기 다시 연결</button>}</div>
               <div class="preview-screen">
                 @if ((analysis()?.state === 'running' || analysis()?.state === 'draining') && !previewFailed()) {<img [src]="previewUrl()" alt="사람 탐지와 추적 번호가 표시된 카메라 영상" (error)="previewFailed.set(true)">} @else {<div class="preview-placeholder">{{ previewFailed() ? '미리보기 연결이 종료되었습니다. 다시 연결해 주세요.' : analysisLabel() }}<small>분석을 시작하면 영상에 사람 박스와 추적 번호가 표시됩니다.</small></div>}
-              </div><p class="preview-caption">추적 번호는 현재 카메라의 영상 세션 안에서만 유효합니다. 얼굴 인식은 다음 단계에서 추가됩니다.</p>
+              </div><p class="preview-caption">추적 번호는 현재 카메라의 영상 세션 안에서만 유효합니다. 좋은 얼굴의 특징을 준비합니다. 등록 인물 검색은 다음 단계에서 제공됩니다.</p>
             </section>
-            <aside class="card metrics-card"><div class="card-label">LIVE METRICS</div><h2>분석 상태</h2><dl><dt>사람 수</dt><dd>{{ analysis()?.result?.tracks?.length || 0 }}명</dd><dt>입력 해상도</dt><dd>{{ analysis()?.resolution?.join(' × ') || '—' }}</dd><dt>수신 FPS</dt><dd>{{ analysis()?.capture_fps ?? '—' }}</dd><dt>탐지 FPS</dt><dd>{{ analysis()?.detection_fps ?? '—' }}</dd><dt>처리 프레임</dt><dd>{{ analysis()?.processed_frames ?? 0 }}</dd><dt>건너뛴 프레임</dt><dd>{{ analysis()?.dropped_frames ?? 0 }}</dd><dt>처리 지연 P95</dt><dd>{{ analysis()?.latency_p95_ms ?? '—' }} ms</dd></dl><small>2초마다 갱신 · 최신 프레임을 우선 처리합니다. 지연은 서버 수신부터 분석·JPEG 생성까지의 시간입니다.</small></aside>
+            <aside class="card metrics-card"><div class="card-label">LIVE METRICS</div><h2>분석 상태</h2><dl><dt>사람 수</dt><dd>{{ analysis()?.result?.tracks?.length || 0 }}명</dd><dt>입력 해상도</dt><dd>{{ analysis()?.resolution?.join(' × ') || '—' }}</dd><dt>수신 FPS</dt><dd>{{ analysis()?.capture_fps ?? '—' }}</dd><dt>탐지 FPS</dt><dd>{{ analysis()?.detection_fps ?? '—' }}</dd><dt>얼굴 검사 FPS</dt><dd>{{ analysis()?.face_analysis_fps ?? 0 }}</dd><dt>얼굴 ROI / 초</dt><dd>{{ analysis()?.face_roi_fps ?? 0 }}</dd><dt>특징 생성</dt><dd>{{ analysis()?.face_counts?.embeddings_created ?? 0 }}회</dd><dt>처리 프레임</dt><dd>{{ analysis()?.processed_frames ?? 0 }}</dd><dt>건너뛴 프레임</dt><dd>{{ analysis()?.dropped_frames ?? 0 }}</dd><dt>처리 지연 P95</dt><dd>{{ analysis()?.latency_p95_ms ?? '—' }} ms</dd></dl><small>2초마다 갱신 · 최신 프레임을 우선 처리합니다. 지연은 서버 수신부터 분석·JPEG 생성까지의 시간입니다.</small></aside>
           </div>
+          <section class="card faces-panel">
+            <h2>추적별 얼굴 분석</h2>
+            <p>크기·선명도·밝기·자세를 검사합니다. 품질을 통과한 가장 좋은 얼굴만 유지합니다.</p>
+            <div class="face-grid">
+              @for (track of analysis()?.result?.tracks || []; track track.track_id) {
+                <article class="face-card" [class.face-ready]="track.face?.embedding_ready">
+                  @if (track.face?.embedding_ready) {<img [src]="faceUrl(track)" [alt]="'추적 ' + track.track_id + '의 정렬된 최적 얼굴'" width="112" height="112">} @else {<div class="face-empty">#{{ track.track_id }}</div>}
+                  <div class="face-details"><strong>추적 #{{ track.track_id }}</strong><div class="face-status">{{ faceLabel(track.face) }}</div><small>현재 품질 {{ track.face?.quality ?? 0 | number:'1.2-2' }} / 1.00</small>
+                    @if (track.face?.best; as best) {<small>최적 품질 {{ best.quality | number:'1.2-2' }} · 512차원</small>}
+                    @if (track.face?.face_size) {<small>{{ track.face!.face_size!.join(' × ') }} px · 밝기 {{ track.face?.brightness | number:'1.0-0' }}</small>}
+                    @if (track.face?.yaw !== null && track.face?.yaw !== undefined) {<small>yaw {{ track.face?.yaw | number:'1.0-0' }}° · pitch {{ track.face?.pitch | number:'1.0-0' }}° · roll {{ track.face?.roll | number:'1.0-0' }}°</small>}
+                    @if (faceReasons(track.face)) {<small class="face-reasons">{{ faceReasons(track.face) }}</small>}
+                  </div>
+                </article>
+              } @empty {<div class="text-secondary">분석 중인 사람의 얼굴 정보가 여기에 표시됩니다.</div>}
+            </div>
+            <small class="face-note">품질 기준과 자세 추정은 시험용 설정입니다. 특징 준비는 인물 확인을 의미하지 않습니다.</small>
+          </section>
         }
       }
     </main>

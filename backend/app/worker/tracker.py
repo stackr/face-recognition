@@ -39,6 +39,11 @@ class CameraTracker:
         self.lost_seconds = settings.track_lost_seconds
         self.seen = {}
 
+    def live_ids(self):
+        return {
+            track.track_id for track in self.tracker.tracked_stracks + self.tracker.lost_stracks
+        }
+
     def update(self, boxes, frame, now):
         # Predict for missed analysis ticks, bounded by retention. Long gaps expire
         # tracks before association, so identities cannot survive a stalled stream.

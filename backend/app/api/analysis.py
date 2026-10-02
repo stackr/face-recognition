@@ -7,8 +7,8 @@ from typing import Literal
 
 import httpx
 from cryptography.fernet import Fernet
-from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -281,4 +281,24 @@ async def preview(camera_id: int, request: Request):
         preview_frames(request, camera_id),
         media_type="multipart/x-mixed-replace; boundary=frame",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-store"},
+    )
+
+
+@router.get("/{camera_id}/faces/{track_id}")
+def face_thumbnail(
+    camera_id: int,
+    track_id: int,
+    request: Request,
+    stream_session_id: str = Query(pattern=r"^[a-f0-9]{32}$"),
+):
+    preview_access(request, camera_id)
+    response = request.app.state.worker.request(
+        "GET",
+        f"/internal/cameras/{camera_id}/faces/{track_id}",
+        params={"stream_session_id": stream_session_id},
+    )
+    return Response(
+        response.content,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
     )

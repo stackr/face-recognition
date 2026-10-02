@@ -1,5 +1,6 @@
 import hmac
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -30,7 +31,7 @@ def private_video(source, settings):
     return path
 
 
-def create_worker(settings=None, detector=None):
+def create_worker(settings=None, detector=None, *, face_analyzer=None, enable_faces=True):
     settings = settings or Settings()
 
     @asynccontextmanager
@@ -39,12 +40,15 @@ def create_worker(settings=None, detector=None):
 
         try:
             active_detector = detector or YoloPersonDetector(settings)
+            from app.worker.faces import FaceAnalyzer
+
+            active_faces = (face_analyzer or FaceAnalyzer(settings)) if enable_faces else None
         except Exception as exc:
             logging.getLogger("cctv.worker").error(
                 "Detector startup failed; type=%s", type(exc).__name__
             )
             raise
-        app.state.runtime = WorkerRuntime(settings, active_detector)
+        app.state.runtime = WorkerRuntime(settings, active_detector, active_faces)
         logging.getLogger("cctv.worker").info(
             "Worker ready; device=%s model=%s",
             active_detector.info["actual_device"],
@@ -78,6 +82,9 @@ def create_worker(settings=None, detector=None):
         return {
             "status": "ok",
             "detector": runtime.detector.info,
+            "face_analysis": runtime.face_analyzer.info
+            if runtime.face_analyzer
+            else {"status": "disabled"},
             "resources": runtime.detector.resources(),
             "cameras": states,
         }
@@ -168,6 +175,25 @@ def create_worker(settings=None, detector=None):
                     "X-Captured-At": result["captured_at"],
                     "Cache-Control": "no-store",
                 },
+            )
+
+    @app.get("/internal/cameras/{camera_id}/faces/{track_id}", dependencies=[Depends(authorized)])
+    def thumbnail(camera_id: int, track_id: int, stream_session_id: str, request: Request):
+        run = camera(request, camera_id)
+        with run.lock:
+            if (
+                stream_session_id != run.stream_session_id
+                or run.state not in {"running", "draining"}
+                or run.faces is None
+            ):
+                raise HTTPException(404, "Face not available")
+            jpeg = run.faces.thumbnail(track_id, stream_session_id, time.monotonic())
+            if jpeg is None:
+                raise HTTPException(404, "Face not available")
+            return Response(
+                jpeg,
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
             )
 
     return app

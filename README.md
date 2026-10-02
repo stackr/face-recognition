@@ -1,8 +1,8 @@
 # CCTV Search
 
-비상업 시험용 CCTV 얼굴 검색 프로젝트. 현재 **Phase 2**까지 구현했다. Ubuntu native 서비스와 Python venv를 사용한다.
+비상업 시험용 CCTV 얼굴 검색 프로젝트. 현재 **Phase 3**까지 구현했다. Ubuntu native 서비스와 Python venv를 사용한다.
 
-로그인/카메라 관리에 더해 MP4 및 기본 RTSP 입력, YOLO11n 사람 탐지, ByteTrack 추적, 인증된 MJPEG 미리보기, 카메라별 영상 접근 권한, 별도 GPU worker와 1채널 benchmark를 사용할 수 있다. 얼굴 인식은 Phase 3 이후 구현 대상이다. 전체 요구 사항은 [PLAN.md](PLAN.md), 구현 구성과 후속 설계는 [architecture.md](docs/architecture.md)를 참고한다.
+로그인/카메라 관리에 더해 MP4 및 기본 RTSP 입력, YOLO11n 사람 탐지, ByteTrack 추적, 인증된 MJPEG 미리보기, 카메라별 영상 접근 권한, 별도 GPU worker와 1채널 benchmark를 사용할 수 있다. SCRFD 얼굴 탐지, 5-point alignment, 품질/자세 평가와 L2 정규화된 512차원 ArcFace 특징을 생성한다. 등록 인물 검색은 Phase 4 구현 대상이다. 전체 요구 사항은 [PLAN.md](PLAN.md), 구현 구성과 후속 설계는 [architecture.md](docs/architecture.md)를 참고한다.
 
 ## 현재 실행 환경
 
@@ -75,7 +75,7 @@ CPU 시험은 다음처럼 명시적으로 수행한다. CUDA 요청의 CPU fall
 .venv/bin/python scripts/check_gpu.py --allow-cpu-fallback
 ```
 
-실제 YOLO/얼굴 모델의 CUDA 추론과 4채널 처리량은 Phase 2~3 이후 검증 대상이다. `nvidia-smi`의 driver 지원 CUDA 버전과 venv에서 사용하는 runtime 버전을 구분한다. 참고: [PyTorch 공식 설치 조합](https://pytorch.org/get-started/previous-versions/), [ONNX Runtime CUDA 요구 조건](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html).
+실제 YOLO 및 얼굴 모델 3개의 CUDA 추론을 검증했다. 4채널 처리량은 후속 검증 대상이다. `nvidia-smi`의 driver 지원 CUDA 버전과 venv에서 사용하는 runtime 버전을 구분한다. 참고: [PyTorch 공식 설치 조합](https://pytorch.org/get-started/previous-versions/), [ONNX Runtime CUDA 요구 조건](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html).
 
 ## MariaDB 설정 및 migration
 
@@ -108,7 +108,7 @@ GRANT ALL PRIVILEGES ON cctv_search_test.* TO 'cctv_search'@'localhost';
 
 공식 GitHub release의 Linux x86_64 바이너리를 `.tools/qdrant/`에 설치하고 공개된 SHA256을 검증한다. 다운로드 출처와 checksum은 `.tools/qdrant/release.json`에 기록한다. native 설정은 `config/qdrant.yaml`이며 저장 경로는 `data/qdrant/`, HTTP/gRPC는 localhost의 6333/6334다. telemetry는 끈다. `QDRANT_API_KEY`를 설정하면 runner와 client에 함께 적용된다.
 
-서비스가 실행 중일 때 다음 명령은 임의 이름의 임시 collection에서 생성/upsert/query/retrieve/delete를 검증하고 collection을 정리한다. 아직 얼굴 모델을 선정하지 않았으므로 실제 `face_embeddings` collection은 만들지 않는다.
+서비스가 실행 중일 때 다음 명령은 임의 이름의 임시 collection에서 생성/upsert/query/retrieve/delete를 검증하고 collection을 정리한다. Phase 3에서는 얼굴 특징을 worker 메모리에만 유지하므로 실제 `face_embeddings` collection은 아직 만들지 않는다. 인물 등록과 Qdrant 검색은 Phase 4 범위다.
 
 ```bash
 .venv/bin/python scripts/check_services.py
@@ -186,7 +186,7 @@ npm --prefix frontend run test:e2e
 
 브라우저 테스트는 backend/Angular/Qdrant 서비스와 생성된 초기 계정 파일이 필요하다. 현재는 설치된 `/usr/bin/google-chrome`을 headless로 사용하며 다른 OS/브라우저 경로에서는 `frontend/playwright.config.ts`를 수정한다. trace를 저장하지 않는다. 화면 캡처는 `data/screenshots/dashboard.png`다.
 
-검증 결과는 [phase1-report.md](docs/phase1-report.md)와 [phase2-report.md](docs/phase2-report.md)에 기록했다.
+검증 결과는 [phase1-report.md](docs/phase1-report.md), [phase2-report.md](docs/phase2-report.md), [phase3-report.md](docs/phase3-report.md)에 기록했다.
 
 ## MP4 / RTSP / Benchmark
 
@@ -194,7 +194,10 @@ npm --prefix frontend run test:e2e
 
 ```bash
 .venv/bin/python scripts/prepare_phase2.py
+.venv/bin/python scripts/prepare_phase3.py
+.venv/bin/python scripts/prepare_face_samples.py
 .venv/bin/python scripts/check_yolo.py
+.venv/bin/python scripts/check_face_gpu.py
 .venv/bin/alembic -c backend/alembic.ini upgrade head
 .venv/bin/python scripts/install_user_services.py --start
 ```
@@ -209,7 +212,7 @@ npm --prefix frontend run test:e2e
 
 **MP4 시험:** 입력 유형을 `시험 영상 · MP4`로 등록하고 영상 분석에서 `data/videos/people.mp4` 또는 자신의 MP4를 업로드한다. 업로드 후 분석 입력을 MP4로 선택하고 시작한다. 반복 재생을 끄면 파일 끝에서 종료된다. 반복/재시작마다 새 영상 세션을 만들고 추적 번호를 초기화한다.
 
-미리보기는 사람 박스/추적 번호가 표시된 분석 JPEG다. 기본 탐지와 미리보기 전달의 목표는 각각 5 FPS이며, 원본 영상의 모든 프레임을 표시하지 않는다. 얼굴/동일인 판정은 아직 제공하지 않는다. 최대 입력은 3840×2160, 업로드는 파일당 200 MB, 영상 저장은 총 1000 MB이며 최소 잔여 디스크 500 MB를 유지한다. 동시 분석 기본 상한 4대는 자원 제한이고 4채널 처리 성능 보장은 아니다. 미리보기는 카메라당 4명/전체 16명으로 제한한다.
+미리보기는 사람 박스/추적 번호가 표시된 분석 JPEG다. 기본 탐지와 미리보기 전달의 목표는 각각 5 FPS이며, 원본 영상의 모든 프레임을 표시하지 않는다. 얼굴 box/landmark와 추적별 최적 얼굴 및 품질 제외 사유를 확인할 수 있다. 동일인 판정은 아직 제공하지 않는다. 최대 입력은 3840×2160, 업로드는 파일당 200 MB, 영상 저장은 총 1000 MB이며 최소 잔여 디스크 500 MB를 유지한다. 동시 분석 기본 상한 4대는 자원 제한이고 4채널 처리 성능 보장은 아니다. 미리보기는 카메라당 4명/전체 16명으로 제한한다.
 
 초기 계정 파일을 이용하는 로컬 검증 명령이다. 비밀번호는 출력하지 않는다.
 
@@ -224,20 +227,43 @@ npm --prefix frontend run test:e2e
 .venv/bin/python scripts/check_camera.py 3 --status-only
 ```
 
-benchmark는 실제 영상 FPS로 재생하며 서버 수신→탐지/추적/JPEG의 평균/P95 지연, 처리 FPS, 최신 프레임 교체 수, Torch GPU 메모리와 NVML GPU 사용량을 `data/reports/phase2-benchmark.json`에 기록한다. 성능 측정 구간에는 미리보기 시청자가 없고 종료 직전에 인증된 JPEG 전달을 별도 검증한다. 브라우저 지연/카메라 인코더 지연 및 얼굴 분석 비용은 포함하지 않는다. offline 최대 처리량과 다중 채널 측정은 아직 구현하지 않았다.
+benchmark는 실제 영상 FPS로 재생하며 서버 수신→탐지/추적/JPEG의 평균/P95 지연, 처리 FPS, 최신 프레임 교체 수, Torch GPU 메모리와 NVML GPU 사용량을 `data/reports/benchmark.json`에 기록한다. 과거 Phase 2 보고서는 `data/reports/phase2-benchmark.json`에 남겨 두었다. 성능 측정 구간에는 미리보기 시청자가 없고 종료 직전에 인증된 JPEG 전달을 별도 검증한다. 현재 worker는 얼굴 분석도 실행하며 해당 비용을 포함한다. 브라우저 지연과 카메라 인코더 지연은 포함하지 않는다. 과거 Phase 2 측정에는 얼굴 분석이 없었다. offline 최대 처리량과 다중 채널 측정은 아직 구현하지 않았다.
 
-| Method | Phase 2 경로 | 권한 |
+| Method | 영상 분석 경로 | 권한 |
 | --- | --- | --- |
 | PUT | `/api/cameras/{id}/video` | admin + CSRF; raw `video/mp4` body |
 | POST | `/api/cameras/{id}/start` | admin 또는 해당 카메라 조작 권한의 operator + CSRF |
 | POST | `/api/cameras/{id}/stop` | 위와 동일 |
 | GET | `/api/cameras/{id}/status` | admin 또는 해당 카메라 조회 권한 |
 | GET | `/api/cameras/{id}/preview` | 위와 동일; 활성 카메라의 MJPEG |
+| GET | `/api/cameras/{id}/faces/{track_id}?stream_session_id={session}` | 위와 동일; 현재 세션의 정렬된 최적 얼굴 JPEG |
 | PUT | `/api/cameras/{id}/access` | admin + CSRF; username/can_view/can_operate |
 
 `start` body는 `{"source_type":"mp4","loop":true}` 또는 `{}`다. 입력 URL이나 파일 경로를 브라우저에서 지정할 수 없다. 내부 `/internal/*`는 API나 Nginx에서 공개하지 않는다. 로그아웃/계정 비활성화/권한 해제 후 기존 미리보기는 최대 2초 주기로 권한을 재검사하여 닫힌다. 전송은 한 프레임씩 소비하며 느린 시청자용 프레임 큐를 쌓지 않는다.
 
-현재 RTSP는 기본 연결과 read/open timeout만 제공한다. 자동 재연결/backoff는 Phase 5, 얼굴 분석은 Phase 3, 다중 camera 최적화는 Phase 9에서 추가한다.
+현재 RTSP는 기본 연결과 read/open timeout만 제공한다. 자동 재연결/backoff는 Phase 5, 다중 camera 최적화는 Phase 9에서 추가한다.
+
+## 얼굴 분석 및 Phase 3 시험
+
+얼굴 모델은 worker 한 곳에서 공유한다. 기존 설치에서는 모델 준비 후 `systemctl --user restart cctv-backend cctv-worker`로 코드를 반영한다. 카메라를 자동으로 시작하지 않으며 등록된 RTSP/계정/카메라 설정은 유지한다. `.venv/bin/python scripts/check_phase3.py`는 worker startup 완료를 기다린 뒤 실제 모델 장치와 서비스 상태를 읽기 전용으로 확인한다.
+
+카메라 관리에서 **영상 분석 → 분석 시작**을 누르면 사람 추적에 얼굴 분석이 추가된다. **추적별 얼굴 분석**에 현재 품질·제외 사유·자세와 최적 얼굴 썸네일이 표시된다. `얼굴 특징 준비됨`은 특징 생성 상태이며 인물을 식별한 결과가 아니다. 시험 MP4에는 `data/videos/face-smoke.mp4`를 사용할 수 있다.
+
+기본값은 track별 최소 0.5초 간격, frame당 최대 4 ROI, camera당 얼굴 cache 최대 100 track이다. 원본 얼굴 최소 변 길이 80px, Laplacian variance 60 이상, 평균 밝기 35~220, yaw/pitch/roll 절대값 최대 40/30/35도 및 품질 0.7 이상을 요구한다. 정렬과 landmark geometry는 가림 가능성을 검사하는 heuristic이며 정확한 가림 classifier로 검증된 것은 아니다. 크기/자세 등의 hard gate에 미달하면 품질 점수가 높아도 ArcFace를 실행하지 않는다.
+
+같은 track에서 통과한 얼굴의 품질이 개선됐을 때만 embedding을 생성한다. 특징은 512차원 float32/L2 normalized이며 버전은 `buffalo_l-v0.7-w600k_r50-4c06341c33c2`다. 벡터는 브라우저/상태 API에 전달하지 않고 worker 메모리에만 유지한다. 중지/오류/EOF/반복/재시작에서 해당 세션의 이미지·특징 cache를 없애고 lost track은 3초 후 만료한다. 썸네일은 인증·카메라 grant와 필수 session ID를 검사하며 public static 경로가 아니다.
+
+```bash
+.venv/bin/python scripts/check_face_gpu.py
+# 별도 worker 스레드에서 80회 반복: 기능/메모리 회귀 시험이며 처리량 benchmark가 아님
+.venv/bin/python scripts/check_face_pipeline.py
+# 다른 카메라 및 GPU 검증 작업을 실행하지 않은 상태에서 순서대로 실행
+.venv/bin/python scripts/benchmark.py --video data/videos/face-smoke.mp4 --duration 20 --require-embeddings --output data/reports/phase3-benchmark.json
+```
+
+benchmark는 입력 1280×720/10 FPS, detector 640, 얼굴 detector 320, 실제 모델 SHA/device와 사람 수·ROI 요청/품질 통과·제외/특징 생성 수, 처리 지연 및 GPU 자원을 기록한다. 측정 중 다른 카메라가 시작되면 중단하고 자신이 만든 임시 카메라만 정리한다. Torch 메모리 수치는 ONNX Runtime allocation을 포함하지 않으므로 NVML 전체 GPU 사용량도 함께 기록한다. `face_analysis_fps`는 ROI를 한 번 이상 검사한 frame/초이고 `face_roi_fps`는 person ROI 검사/초이며 ArcFace 특징 생성 횟수와 구분한다.
+
+[calibration-data.md](docs/calibration-data.md)는 촬영 group 단위 분리, 수동 출현 구간/subject 정답, positive/negative pair의 검증 형식을 설명한다. 준비된 공개 사진·밝기 변형·반복 MP4는 smoke 자료다. 독립 정확도 평가 자료가 없어 검색 threshold 보정과 FAR/FRR은 `unavailable`이다.
 
 ## Troubleshooting
 

@@ -33,7 +33,7 @@ def test_invalid_configuration_hides_secret_values():
 
 
 def test_public_health_and_private_endpoints(client):
-    assert client.get("/api/health").json() == {"status": "ok", "phase": 2}
+    assert client.get("/api/health").json() == {"status": "ok", "phase": 3}
     for path in ["/api/auth/me", "/api/cameras", "/api/system/status"]:
         assert client.get(path).status_code == 401
 
@@ -119,6 +119,36 @@ def test_duplicate_name_conflict_does_not_create_an_extra_camera(client, admin_h
     response = client.post("/api/cameras", json=PAYLOAD, headers=admin_headers)
     assert response.status_code == 409 and "private-password" not in response.text
     assert len(client.get("/api/cameras").json()) == 1
+
+
+@pytest.mark.parametrize("stale_rtsp", ["not-an-rtsp-url", PAYLOAD["rtsp_url"]])
+def test_mp4_create_and_update_ignore_hidden_rtsp_values(app_context, admin_headers, stale_rtsp):
+    client, engine, settings = app_context
+    payload = {**PAYLOAD, "source_type": "mp4", "rtsp_url": stale_rtsp}
+    response = client.post("/api/cameras", json=payload, headers=admin_headers)
+    assert response.status_code == 201
+    camera_id = response.json()["camera_id"]
+    assert response.json()["rtsp_url"] == "" and not response.json()["has_test_video"]
+    response = client.put(f"/api/cameras/{camera_id}", json=payload, headers=admin_headers)
+    assert response.status_code == 200 and response.json()["rtsp_url"] == ""
+    with Session(engine) as db:
+        stored = db.get(Camera, camera_id)
+        assert stored.source_type == "mp4"
+        assert (
+            Fernet(settings.rtsp_encryption_key.get_secret_value()).decrypt(
+                stored.rtsp_url_encrypted.encode()
+            )
+            == b""
+        )
+
+
+def test_rtsp_sources_still_require_a_valid_url(client, admin_headers):
+    for rtsp_url in ("", "not-an-rtsp-url"):
+        response = client.post(
+            "/api/cameras", json={**PAYLOAD, "rtsp_url": rtsp_url}, headers=admin_headers
+        )
+        assert response.status_code == 422
+    assert client.get("/api/cameras").json() == []
 
 
 def test_csrf_origin_and_role_permissions(client, admin_headers):

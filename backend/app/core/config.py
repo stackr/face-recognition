@@ -33,6 +33,17 @@ class Settings(BaseSettings):
     log_dir: Path = ROOT / "logs"
     worker_url: str = "http://127.0.0.1:8001"
     yolo_model_path: Path = ROOT / "data/models/yolo11n.pt"
+    face_model_dir: Path = ROOT / "data/models/buffalo_l"
+    face_analysis_interval: float = Field(default=0.5, ge=0.2, le=10)
+    face_rois_per_frame: int = Field(default=4, ge=1, le=16)
+    face_tracks_per_camera: int = Field(default=100, ge=1, le=200)
+    face_min_size: int = Field(default=80, ge=32, le=512)
+    face_detection_threshold: float = Field(default=0.5, ge=0.1, le=0.99)
+    face_quality_threshold: float = Field(default=0.7, ge=0, le=1)
+    face_min_blur: float = Field(default=60, ge=1, le=1000)
+    face_max_yaw: float = Field(default=40, ge=5, le=80)
+    face_max_pitch: float = Field(default=30, ge=5, le=80)
+    face_max_roll: float = Field(default=35, ge=5, le=80)
     video_dir: Path = ROOT / "data/videos"
     detection_fps: float = Field(default=5, ge=1, le=15)
     detection_confidence: float = Field(default=0.1, ge=0, le=1)
@@ -76,7 +87,7 @@ class Settings(BaseSettings):
             raise ValueError("Worker must use a localhost HTTP URL")
         return value.rstrip("/")
 
-    @field_validator("yolo_model_path", "video_dir", "log_dir", "gpu_report_path")
+    @field_validator("yolo_model_path", "face_model_dir", "video_dir", "log_dir", "gpu_report_path")
     @classmethod
     def project_path(cls, value: Path) -> Path:
         return value if value.is_absolute() else ROOT / value

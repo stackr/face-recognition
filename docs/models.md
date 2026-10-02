@@ -61,9 +61,29 @@ COCO pretrained **YOLO11n** detection model의 person class(0)만 사용한다. 
 
 `scripts/prepare_phase2.py`는 원본과 모델을 고정 SHA256에 대조한다. 다운로드 및 인코딩 metadata는 `data/reports/phase2-assets.json`, 실제 YOLO 검증 결과는 `data/reports/yolo.json`에 저장한다.
 
-## 후속 Phase의 모델 선정 예정
+## Phase 3 실제 얼굴 모델
 
-- Phase 3: InsightFace와 호환되는 detector/ArcFace ONNX 가중치를 선정한다. 라이브러리 코드의 MIT License와 공식 pretrained model의 비상업 연구용 제한을 구분하고, 실제 시험 목적이 허용 범위에 해당하는지 확인한다.
-- 실제 모델을 선택하기 전에는 모델 license 검토 완료나 해당 모델의 CUDA inference 검증 완료로 표시하지 않는다.
+InsightFace 공식 **buffalo_l v0.7** 패키지에서 SCRFD face detector, 3D landmark 모델, ArcFace recognition 모델을 사용한다. InsightFace 전체 Python 배포는 설치하지 않고, 기존 OpenCV/NumPy/ONNX Runtime으로 고정된 모델의 tensor protocol을 처리한다. 코드 convention/ArcFace template의 MIT 고지는 `third_party/insightface/LICENSE`에 보관했다. 신규 Python 의존성은 없다.
 
-공식 참고: [Ultralytics 라이선스](https://www.ultralytics.com/license), [InsightFace 모델 사용 조건](https://github.com/deepinsight/insightface/blob/master/python-package/docs/model_zoo.md), [PyTorch CUDA wheel](https://pytorch.org/get-started/previous-versions/), [ONNX Runtime CUDA 요구 조건](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html).
+- 가중치: [공식 buffalo_l v0.7 release](https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip)
+- 코드 convention: [SCRFD](https://github.com/deepinsight/insightface/blob/v0.7/python-package/insightface/model_zoo/scrfd.py), [ArcFace](https://github.com/deepinsight/insightface/blob/v0.7/python-package/insightface/model_zoo/arcface_onnx.py), [landmark/pose](https://github.com/deepinsight/insightface/blob/v0.7/python-package/insightface/model_zoo/landmark.py), [alignment](https://github.com/deepinsight/insightface/blob/v0.7/python-package/insightface/utils/face_align.py)
+- 코드 사용 조건: [MIT License, Copyright 2022 Jiankang Deng and Jia Guo](https://github.com/deepinsight/insightface/blob/v0.7/LICENSE)
+- **가중치는 MIT가 아니며 공식 pretrained model의 비상업 연구용 사용 조건을 따른다.** 이 프로젝트의 비상업 시험 목적에 사용하고 상용 라이선스나 서명 검증 완료를 표시하지 않는다. [공식 모델 사용 조건](https://github.com/deepinsight/insightface#license)
+
+| Artifact | SHA256 |
+| --- | --- |
+| buffalo_l.zip | `80ffe37d8a5940d59a7384c201a2a38d4741f2f3c51eef46ebb28218a7b0ca2f` |
+| det_10g.onnx | `5838f7fe053675b1c7a08b633df49e7af5495cee0493c7dcf6697200b85b5b91` |
+| 1k3d68.onnx | `df5c06b8a0c12e422b2ed8947b8869faa4105387f199c477af038aa01f9a45cc` |
+| w600k_r50.onnx | `4c06341c33c2ca1f86781dab0e829f88ad5b64be9fba56e56bc9ebdefc619e43` |
+| meanshape_68.npy | `e32b77ecb2a39112eea88e727bd39db5319f5593590cecebcd3955d0b2d2257c` |
+
+`scripts/prepare_phase3.py`는 archive/model/공식 mean shape와 sample의 SHA256을 고정하고 확인한다. fixed upstream pickle은 hash 확인 후 준비 스크립트에서만 NumPy로 변환하며, runtime은 `allow_pickle=False`로 고정된 `.npy`를 읽는다. 사용자 업로드를 pickle로 해석하지 않는다. archive와 weight, sample 및 변환 파일은 Git에 포함하지 않는다.
+
+SCRFD는 person ROI를 종횡비 유지하여 320×320에 padding하고 RGB `(pixel-127.5)/128`로 입력한다. release의 detector input은 dynamic이지만 output metadata에는 640 기준 수가 남아 있어 shape annotation만 메모리에서 dynamic으로 바꾼다. 모델 tensor/weight는 바꾸지 않는다. 1k3d68은 192×192 RGB와 graph 내부 `bn_data` normalization을 사용한다. ArcFace는 5-point similarity alignment의 112×112 RGB `(pixel-127.5)/127.5` 입력을 사용하고 float32 512차원 출력을 L2 normalize한다. 버전은 `buffalo_l-v0.7-w600k_r50-4c06341c33c2`이며 다른 모델과 검색 공간을 공유하지 않는다.
+
+각 모델의 실제 CUDA convolution profile과 공개 얼굴 입력에 대한 생성 결과는 `data/reports/face-gpu.json`에 저장한다. provider 목록만으로 CUDA 성공을 판정하지 않는다. 품질 기준은 현재 시험용 heuristic이며 자세 모델/landmark geometry가 정확한 가림 classifier를 대신한다고 표시하지 않는다.
+
+얼굴 시험용 [Ultralytics 공개 zidane.jpg](https://github.com/ultralytics/assets/blob/main/im/zidane.jpg)의 SHA256은 `16d73869e3267a7d4ed00de8e860833bd1657c1b252e94c0c348277adc7b6edb`다. 해당 이미지의 제3자 사진 사용권이 라이브러리 코드의 AGPL/MIT에서 자동 허용된다고 해석하지 않는다. 로컬 smoke 시험에만 사용하고 사진·파생 자료를 저장소에 재배포하지 않는다. 자료 성격과 수동 정답의 범위는 [calibration-data.md](calibration-data.md)에 기록한다.
+
+공식 참고: [Ultralytics 라이선스](https://www.ultralytics.com/license), [InsightFace 모델 사용 조건](https://github.com/deepinsight/insightface/blob/master/python-package/docs/model_zoo.md), [ONNX Runtime CUDA 요구 조건](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html).

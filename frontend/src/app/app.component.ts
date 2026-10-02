@@ -12,10 +12,17 @@ interface Camera {
   source_type: 'rtsp' | 'mp4'; has_test_video: boolean;
 }
 interface CameraForm { name: string; description: string; rtsp_url: string; location: string; enabled: boolean; source_type: 'rtsp' | 'mp4'; }
+interface FaceStatus {
+  status: string; quality: number; reasons: string[]; embedding_ready: boolean;
+  face_size?: number[]; blur_score?: number; brightness?: number; yaw?: number; pitch?: number; roll?: number;
+  best?: {quality: number; frame_id: number; captured_at: string; model_version: string};
+}
+interface AnalysisTrack {track_id: number; confidence: number; face?: FaceStatus;}
 interface AnalysisStatus {
   camera_id: number; state: string; error_code?: string; source_type?: string; stream_session_id?: string;
   detection_fps?: number; capture_fps?: number; processed_frames?: number; dropped_frames?: number;
-  latency_p95_ms?: number; resolution?: number[]; result?: {tracks: {track_id: number; confidence: number}[]};
+  latency_p95_ms?: number; resolution?: number[]; result?: {tracks: AnalysisTrack[]};
+  face_analysis_fps?: number; face_roi_fps?: number; face_counts?: {embeddings_created?: number; faces_detected?: number};
 }
 interface SystemStatus {
   checked_at: string;
@@ -122,10 +129,15 @@ export class AppComponent implements OnDestroy {
 
   saveCamera() {
     if (this.busy()) return;
+    if (!this.cameraForm.name.trim()) { this.error.set('카메라 이름을 입력해 주세요.'); return; }
+    if (this.cameraForm.source_type === 'rtsp' && !this.cameraForm.rtsp_url.trim()) {
+      this.error.set('CCTV 입력에서는 RTSP 주소를 입력해 주세요.'); return;
+    }
     this.busy.set(true); this.error.set('');
+    const payload = {...this.cameraForm, rtsp_url:this.cameraForm.source_type === 'mp4' ? '' : this.cameraForm.rtsp_url};
     const request = this.editingId === null
-      ? this.http.post<Camera>('/api/cameras', this.cameraForm, {headers: this.headers()})
-      : this.http.put<Camera>(`/api/cameras/${this.editingId}`, this.cameraForm, {headers: this.headers()});
+      ? this.http.post<Camera>('/api/cameras', payload, {headers: this.headers()})
+      : this.http.put<Camera>(`/api/cameras/${this.editingId}`, payload, {headers: this.headers()});
     request.pipe(timeout(10000)).subscribe({
       next: () => { this.busy.set(false); this.cancelEdit(); this.refresh(); this.notice.set('카메라 정보를 저장했습니다.'); },
       error: err => { this.busy.set(false); if (err.status === 409) this.error.set('같은 이름의 카메라가 이미 있습니다.'); else this.handleError(err); }
@@ -188,6 +200,18 @@ export class AppComponent implements OnDestroy {
       error: err => { this.busy.set(false); this.handleError(err); input.value = ''; }
     });
   }
+  faceUrl(track: AnalysisTrack) {
+    return `/api/cameras/${this.selectedCamera()?.camera_id}/faces/${track.track_id}?stream_session_id=${this.analysis()?.stream_session_id}&v=${track.face?.best?.frame_id}`;
+  }
+  faceLabel(face?: FaceStatus) {
+    if (face?.embedding_ready) return '얼굴 특징 준비됨';
+    const labels: Record<string,string> = {pending:'얼굴 검사 대기', no_face:'얼굴이 보이지 않음', ambiguous:'얼굴 연결 보류', rejected:'품질 기준 미달', capacity:'얼굴 검사 대기'};
+    return labels[face?.status || ''] || '얼굴 검사 대기';
+  }
+  faceReasons(face?: FaceStatus) {
+    const labels: Record<string,string> = {no_face:'얼굴 미검출', multiple_faces:'여러 얼굴 검출', face_too_small:'얼굴이 작음', face_clipped:'얼굴이 화면 밖으로 잘림', invalid_face_box:'얼굴 영역 오류', blurred:'흐린 영상', too_dark:'너무 어두움', too_bright:'너무 밝음', low_confidence:'탐지 신뢰도 부족', landmark_geometry:'landmark 불안정 또는 가림 가능성', pose_exceeded:'얼굴 각도 기준 초과', pose_unavailable:'자세 측정 불가', quality_below_threshold:'종합 품질 부족', cache_capacity:'검사 용량 제한'};
+    return (face?.reasons || []).map(reason => labels[reason] || reason).join(' · ');
+  }
   previewUrl() { return `/api/cameras/${this.selectedCamera()?.camera_id}/preview?v=${this.previewVersion()}`; }
   reconnectPreview() { this.previewFailed.set(false); this.previewVersion.update(value => value + 1); }
   analysisLabel() {
@@ -195,7 +219,7 @@ export class AppComponent implements OnDestroy {
     return labels[this.analysis()?.state || ''] || '상태 확인 중';
   }
   analysisError() {
-    const labels: Record<string,string> = {source_open_failed:'영상을 열지 못했습니다. 카메라 접속 정보와 네트워크를 확인하세요.', source_read_failed:'영상 수신이 끊겼습니다. 분석을 다시 시작하세요.', source_resolution_exceeded:'지원하는 최대 입력 해상도는 3840×2160입니다.', capture_failed:'영상 수신에 실패했습니다.', inference_failed:'사람 탐지에 실패했습니다. 분석 서비스를 확인하세요.'};
+    const labels: Record<string,string> = {source_open_failed:'영상을 열지 못했습니다. 카메라 접속 정보와 네트워크를 확인하세요.', source_read_failed:'영상 수신이 끊겼습니다. 분석을 다시 시작하세요.', source_resolution_exceeded:'지원하는 최대 입력 해상도는 3840×2160입니다.', capture_failed:'영상 수신에 실패했습니다.', inference_failed:'영상 분석에 실패했습니다. 분석 서비스를 확인하세요.'};
     return labels[this.analysis()?.error_code || ''] || '';
   }
   setCameraAccess(canView: boolean) {

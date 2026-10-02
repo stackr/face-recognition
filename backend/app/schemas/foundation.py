@@ -31,6 +31,15 @@ class CameraInput(BaseModel):
     location: str = Field(default="", max_length=255)
     enabled: bool = True
 
+    @model_validator(mode="before")
+    @classmethod
+    def source_fields(cls, value):
+        # An inactive RTSP control can still contain a value after switching to MP4.
+        # MP4 sources do not validate or retain those unrelated credentials.
+        if isinstance(value, dict) and value.get("source_type") == "mp4":
+            return {**value, "rtsp_url": ""}
+        return value
+
     @field_validator("name")
     @classmethod
     def nonempty_name(cls, value: str) -> str:

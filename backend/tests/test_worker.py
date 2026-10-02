@@ -77,7 +77,7 @@ def test_worker_auth_source_validation_latest_frame_and_restart(app_context):
     settings.max_active_cameras = 1
     video = settings.video_dir / "test.mp4"
     write_video(video)
-    worker = create_worker(settings, TestDetector())
+    worker = create_worker(settings, TestDetector(), enable_faces=False)
     with TestClient(worker) as client:
         assert client.get("/internal/status").status_code == 401
         client.headers["X-Service-Token"] = settings.service_token.get_secret_value()
@@ -111,7 +111,7 @@ def test_mp4_loop_creates_new_session_and_nonloop_ends(app_context):
     settings = app_context[2]
     video = settings.video_dir / "short.mp4"
     write_video(video, seconds=1)
-    with TestClient(create_worker(settings, TestDetector())) as client:
+    with TestClient(create_worker(settings, TestDetector(), enable_faces=False)) as client:
         client.headers["X-Service-Token"] = settings.service_token.get_secret_value()
         payload = {"source": str(video), "source_type": "mp4", "loop": True}
         initial = client.post("/internal/cameras/7/start", json=payload).json()

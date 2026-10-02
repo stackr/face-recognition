@@ -15,13 +15,20 @@ test('MP4 업로드, GPU 사람 탐지, 인증 미리보기와 시작·중지', 
   let cameraId: number | undefined;
   try {
     await page.getByRole('button', {name:'카메라 관리 열기'}).click();
-    await page.getByLabel('카메라 이름', {exact:true}).fill(name);
+    await page.getByLabel('RTSP 주소', {exact:true}).fill('not-an-rtsp-url');
     await page.getByLabel('입력 유형').selectOption('mp4');
     await page.getByRole('button', {name:'카메라 저장'}).click();
+    await expect(page.getByRole('alert')).toHaveText('카메라 이름을 입력해 주세요.');
+    await page.getByLabel('카메라 이름', {exact:true}).fill(name);
+    const saved = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === '/api/cameras');
+    await page.getByRole('button', {name:'카메라 저장'}).click();
+    const created = await saved;
+    if (created.status() === 201) cameraId = (await created.json()).camera_id;
+    expect(created.status()).toBe(201);
+    expect((await created.json()).rtsp_url).toBe('');
+    expect(created.request().postDataJSON().rtsp_url).toBe('');
     const row = page.getByRole('row').filter({hasText:name});
     await expect(row).toBeVisible();
-    const cameras = await (await page.request.get('/api/cameras')).json();
-    cameraId = cameras.find((camera: {name: string}) => camera.name === name).camera_id;
     await row.getByRole('button', {name:'영상 분석', exact:true}).click();
     await page.getByLabel('시험 MP4 업로드').setInputFiles('../data/videos/people.mp4');
     await expect(page.getByText('시험 영상을 업로드했습니다. 분석 시작을 눌러 주세요.')).toBeVisible();
