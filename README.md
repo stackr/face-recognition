@@ -321,7 +321,7 @@ Phase 6 구현과 전체 backend 회귀 91건, frontend 논리 테스트 12건, 
 .venv/bin/python scripts/check_phase6.py
 ```
 
-적용 후 영상 분석 화면에서 최근 검색 이벤트 100건과 확인/거부를 제공한다. 후보는 같은 카메라·session·track·인물별 한 건이며 기본 30초 cooldown 후 사진 개선을 반영한다. 확인/거부는 admin 또는 해당 카메라의 운영 grant가 있는 operator만 가능하다. 조회와 사진 접근에는 카메라·인물 grant를 함께 검사한다. 사진 7일/기록 30일, 저장 한도 500 MB/50,000건이며 `.env.example`의 EVENT 설정으로 조정한다. 녹화 클립은 Phase 8 범위다.
+적용 후 영상 분석 화면에서 최근 검색 이벤트 100건과 확인/거부를 제공한다. 후보는 같은 카메라·session·track·인물별 한 건이며 기본 30초 cooldown 후 사진 개선을 반영한다. 확인/거부는 admin 또는 해당 카메라의 운영 grant가 있는 operator만 가능하다. 조회와 사진 접근에는 카메라·인물 grant를 함께 검사한다. 사진 7일/기록 30일, 저장 한도 500 MB/50,000건이며 `.env.example`의 EVENT 설정으로 조정한다. 녹화 클립은 [Phase 8 결과](docs/phase8-report.md)의 인증된 재생·저장 한도·보관 정책을 따른다.
 
 `GET /api/events?after_id=...`는 신규 기록, `?after_change_id=...`는 기존 이벤트의 변경도 복구한다. limit은 최대 100이며 next_cursor/has_more로 페이지를 진행한다. `/ws/events`는 cookie/Origin/권한과 제한 queue를 검사한다. nginx의 8080 origin을 사용할 경우 실제 브라우저 주소를 `ALLOWED_ORIGINS`에 추가해야 한다. API는 한 프로세스로 실행하며 migration이 없거나 DB 초기 연결이 실패하면 Phase 6 API startup을 중단한다.
 
@@ -376,3 +376,5 @@ npm --prefix frontend run test:e2e
 - 다른 계정에서 영상 403: 관리자가 해당 카메라의 조회/조작 권한을 허용했는지 확인한다.
 
 얼굴 크롭 구현과 검증 범위는 [face-crop-report.md](docs/face-crop-report.md)를 참고한다.
+
+Phase 8 이벤트 영상 클립을 서비스에 반영했다. DB head는 `0007_event_clips`이며 설치·실행·검증 및 한계는 [Phase 8 결과](docs/phase8-report.md)를 참고한다.

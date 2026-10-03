@@ -26,6 +26,8 @@ def app_context(tmp_path):
         video_dir=tmp_path / "videos",
         reference_dir=tmp_path / "references",
         event_dir=tmp_path / "events",
+        clip_dir=tmp_path / "clips",
+        clip_buffer_dir=tmp_path / "clip-buffer",
         allowed_origins=["http://localhost:4200"],
     )
     engine = create_engine(

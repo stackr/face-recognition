@@ -99,7 +99,17 @@ def event_output(db, event, user):
         if images and event.face_image_path
         else None,
         "frame_url": f"/api/events/{event.id}/frame" if images and event.frame_image_path else None,
-        "video_clip_url": None,
+        "video_clip_url": f"/api/events/{event.id}/clip"
+        if event.clip_state == "ready"
+        and event.video_clip_path
+        and event.clip_expires_at
+        and event.clip_expires_at > utc_now()
+        else None,
+        "clip_state": "expired"
+        if event.clip_expires_at and event.clip_expires_at <= utc_now()
+        else event.clip_state,
+        "clip_error": event.clip_error,
+        "clip_details": event.clip_details,
         "can_review": can_manage,
         "can_delete": can_manage,
     }
@@ -142,12 +152,22 @@ class EventStore:
             raise
         return name
 
+    def clip_path(self, name):
+        if not name or not re.fullmatch(r"[a-f0-9]{32}\.mp4", name):
+            raise ValueError("Invalid clip path")
+        path = self.settings.clip_dir / name
+        if path.is_symlink() or path.resolve().parent != self.settings.clip_dir.resolve():
+            raise ValueError("Invalid clip path")
+        return path
+
     def remove_files(self, names):
         for name in names:
             if name:
                 try:
-                    self.path(name).unlink(missing_ok=True)
-                except OSError:
+                    (self.clip_path(name) if name.endswith(".mp4") else self.path(name)).unlink(
+                        missing_ok=True
+                    )
+                except (OSError, ValueError):
                     logging.getLogger("cctv.events").warning("Event image cleanup pending")
 
     def record(self, candidate):
@@ -269,6 +289,12 @@ class EventStore:
                         expires_at=now + timedelta(days=self.settings.event_retention_days),
                         image_expires_at=now
                         + timedelta(days=self.settings.event_image_retention_days),
+                        clip_state="pending" if self.settings.clip_enabled else "disabled",
+                        clip_expires_at=now + timedelta(days=self.settings.clip_retention_days),
+                        clip_details={
+                            "requested_before_seconds": self.settings.video_buffer_before,
+                            "requested_after_seconds": self.settings.video_buffer_after,
+                        },
                     )
                     db.add(event)
                 used = sum(p.stat().st_size for p in self.settings.event_dir.glob("*.jpg"))
@@ -380,8 +406,11 @@ class EventStore:
             for event in rows:
                 if event.status == "deleted":
                     continue
-                removed.extend([event.face_image_path, event.frame_image_path])
+                removed.extend(
+                    [event.face_image_path, event.frame_image_path, event.video_clip_path]
+                )
                 event.face_image_path = event.frame_image_path = None
+                event.video_clip_path, event.clip_state = None, "expired"
                 event.status, event.updated_at = "deleted", utc_now()
                 state.revision += 1
                 event.change_id = state.revision
@@ -427,6 +456,35 @@ class EventStore:
                 db.commit()
             return event_output(db, event, user)
 
+    def finish_clip(self, event_id, *, name=None, error=None, details=None):
+        if name:
+            self.clip_path(name)
+        with self.lock, Session(self.engine) as db:
+            state = self.state(db, lock=True)
+            event = db.get(MatchEvent, event_id)
+            if (
+                not event
+                or event.status == "deleted"
+                or event.clip_state != "pending"
+                or event.expires_at <= utc_now()
+                or event.camera_id is None
+                or event.person_id is None
+            ):
+                return False
+            person = db.get(Person, event.person_id)
+            if not person or person.deleting:
+                return False
+            event.video_clip_path = name
+            event.clip_state = "ready" if name else "failed"
+            event.clip_error = error
+            event.clip_details = event.clip_details | (details or {})
+            event.updated_at = utc_now()
+            state.revision += 1
+            event.change_id = state.revision
+            db.add(EventChange(id=state.revision, event_id=event.id))
+            db.commit()
+            return True
+
     def cleanup(self):
         with self.lock, Session(self.engine) as db:
             self.state(db, lock=True)
@@ -450,13 +508,33 @@ class EventStore:
                                 | MatchEvent.frame_image_path.is_not(None)
                             )
                         )
+                        | (
+                            (MatchEvent.clip_expires_at <= now)
+                            & MatchEvent.video_clip_path.is_not(None)
+                        )
                     )
                     .limit(200)
                 )
             )
             for event in rows:
-                removed.extend([event.face_image_path, event.frame_image_path])
-                event.face_image_path = event.frame_image_path = None
+                if (
+                    event.image_expires_at <= now
+                    or event.expires_at <= now
+                    or event.person_id is None
+                    or event.camera_id is None
+                    or event.person_id in deleting
+                ):
+                    removed.extend([event.face_image_path, event.frame_image_path])
+                    event.face_image_path = event.frame_image_path = None
+                if event.video_clip_path and (
+                    event.clip_expires_at <= now
+                    or event.expires_at <= now
+                    or event.person_id is None
+                    or event.camera_id is None
+                    or event.person_id in deleting
+                ):
+                    removed.append(event.video_clip_path)
+                    event.video_clip_path, event.clip_state = None, "expired"
                 if (
                     event.expires_at <= now
                     or event.person_id is None
@@ -478,4 +556,8 @@ class EventStore:
             cutoff = (now - timedelta(hours=1)).replace(tzinfo=UTC).timestamp()
             for path in self.settings.event_dir.glob("*.jpg"):
                 if path.name not in known and path.stat().st_mtime < cutoff:
+                    self.remove_files([path.name])
+            known_clips = set(db.scalars(select(MatchEvent.video_clip_path)))
+            for path in self.settings.clip_dir.glob("*.mp4"):
+                if path.name not in known_clips and path.stat().st_mtime < cutoff:
                     self.remove_files([path.name])

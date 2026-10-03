@@ -56,6 +56,8 @@ def event_context(tmp_path):
         service_token="t" * 48,
         rtsp_encryption_key=Fernet.generate_key().decode(),
         event_dir=tmp_path / "events",
+        clip_dir=tmp_path / "clips",
+        clip_buffer_dir=tmp_path / "clip-buffer",
         event_ws_queue_size=2,
         event_queue_size=2,
     )
@@ -473,6 +475,12 @@ def test_migration_matches_models_and_seeds_ordered_cursor(tmp_path):
     spec.loader.exec_module(migration)
     with engine.begin() as connection, Operations.context(MigrationContext.configure(connection)):
         migration.upgrade()
+        clip_spec = importlib.util.spec_from_file_location(
+            "clip_migration", migration_path.with_name("0007_event_clips.py")
+        )
+        clip_migration = importlib.util.module_from_spec(clip_spec)
+        clip_spec.loader.exec_module(clip_migration)
+        clip_migration.upgrade()
         from alembic.autogenerate import compare_metadata
 
         assert compare_metadata(MigrationContext.configure(connection), Base.metadata) == []

@@ -74,6 +74,10 @@ def create_worker(
         app.state.runtime = WorkerRuntime(
             settings, active_detector, active_faces, gallery, events, revision
         )
+        if events and settings.clip_enabled:
+            from app.worker.clips import ClipManager
+
+            app.state.runtime.clips = ClipManager(settings, events.store)
         if events:
             from app.worker.diagnostics import DiagnosticsWriter
 
@@ -123,6 +127,7 @@ def create_worker(
             if runtime.diagnostics
             else {"status": "disabled"},
             "sampling": runtime.sampling_status(),
+            "clips": runtime.clips.status() if runtime.clips else {"status": "disabled"},
         }
 
     @app.get("/internal/settings", dependencies=[Depends(authorized)])

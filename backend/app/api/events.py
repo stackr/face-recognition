@@ -11,7 +11,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -86,6 +86,28 @@ def frame(
     db: Session = Depends(get_db),
 ):
     return image(event_id, request, user, db, "frame")
+
+
+@router.api_route("/api/events/{event_id}/clip", methods=["GET", "HEAD"])
+def clip(
+    event_id: int,
+    request: Request,
+    user: User = Depends(current_user),
+    db: Session = Depends(get_db),
+):
+    store = request.app.state.events
+    row = store.find(db, user, event_id)
+    if (
+        row.clip_state != "ready"
+        or not row.video_clip_path
+        or not row.clip_expires_at
+        or row.clip_expires_at <= utc_now()
+    ):
+        raise HTTPException(404, "Event clip unavailable")
+    path = store.clip_path(row.video_clip_path)
+    if not path.is_file():
+        raise HTTPException(404, "Event clip unavailable")
+    return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "no-store"})
 
 
 def review(event_id, request, user, status):

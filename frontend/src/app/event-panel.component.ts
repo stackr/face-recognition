@@ -11,6 +11,8 @@ export interface MatchEvent {
   timestamp: string; face_similarity: number; face_quality: number;
   status: 'candidate' | 'confirmed' | 'rejected'; thumbnail_url: string | null; frame_url: string | null;
   can_review: boolean; can_delete: boolean;
+  video_clip_url?: string | null; clip_state?: string; clip_error?: string | null;
+  clip_details?: {partial?: boolean; before_seconds?: number; after_seconds?: number};
 }
 export interface EventDeletion {type: 'event_deleted'; event_id: number; change_id: number;}
 export type EventChange = MatchEvent | EventDeletion;
@@ -209,6 +211,15 @@ export class EventFeed {
               <small class="event-camera-name">{{ event.camera_name }} · 추적 #{{ event.track_id }}</small>
               <time [attr.datetime]="event.timestamp">{{ event.timestamp | date:'yyyy-MM-dd HH:mm:ss' }}</time>
               <div class="event-scores"><span>유사도 <strong>{{ event.face_similarity | number:'1.3-3' }}</strong></span><span>얼굴 품질 <strong>{{ event.face_quality | number:'1.2-2' }}</strong></span></div>
+              @if (event.clip_state === 'pending') {<small>영상 클립 준비 중</small>}
+              @if (event.clip_state === 'failed') {<small>영상 클립 저장 실패 · {{ event.clip_error }}</small>}
+              @if (event.clip_state === 'expired') {<small>영상 클립 보관 기간 만료</small>}
+              @if (event.video_clip_url) {
+                <details class="event-clip"><summary>영상 클립{{ event.clip_details?.partial ? ' (일부 구간)' : '' }}</summary>
+                  <video controls preload="none" [src]="event.video_clip_url" style="width:100%" aria-label="검색 이벤트 영상 클립"></video>
+                  <small>검출 전 {{ event.clip_details?.before_seconds | number:'1.1-1' }}초 · 후 {{ event.clip_details?.after_seconds | number:'1.1-1' }}초 · 음성 없음</small>
+                </details>
+              }
               <div class="event-actions">
                 @if (event.frame_url) {<a [href]="event.frame_url" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">검출 프레임</a>}
                 @if (event.can_review) {
@@ -260,7 +271,7 @@ export class EventPanelComponent implements OnInit, OnDestroy {
   statusLabel(status: string) {return ({candidate:'확인 전 후보', confirmed:'운영자 확인', rejected:'운영자 거부'} as Record<string, string>)[status] || status;}
   deleteEvent(event: MatchEvent) {
     if (this.reviewing() || this.deleting() || !event.can_delete
-      || !window.confirm(`“${event.person_name}” 검색 이벤트와 검출 사진을 삭제할까요? 삭제 후 복구할 수 없습니다.`)) return;
+      || !window.confirm(`“${event.person_name}” 검색 이벤트와 검출 사진·영상 클립을 삭제할까요? 삭제 후 복구할 수 없습니다.`)) return;
     this.deleting.set(true); this.error.set('');
     this.http.delete<EventDeletion>(`/api/events/${event.event_id}`, {headers:this.requestHeaders})
       .pipe(timeout(8000), takeUntilDestroyed(this.destroyRef)).subscribe({

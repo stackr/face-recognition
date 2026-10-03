@@ -45,7 +45,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         configure_logging(settings.log_dir)
-        logging.getLogger("cctv").info("API started; phase=6")
+        logging.getLogger("cctv").info("API started; phase=8")
         await app.state.event_broker.start()
 
         async def maintain_events():

@@ -93,6 +93,19 @@ class Settings(BaseSettings):
     event_ws_queue_size: int = Field(default=64, ge=1, le=256)
     event_ws_max_clients: int = Field(default=32, ge=1, le=128)
     event_ws_send_timeout_seconds: float = Field(default=5, ge=0.1, le=30)
+    clip_enabled: bool = True
+    clip_dir: Path = ROOT / "data/clips"
+    clip_buffer_dir: Path = ROOT / "data/clip-buffer"
+    video_buffer_before: float = Field(default=5, ge=0, le=30)
+    video_buffer_after: float = Field(default=10, ge=0, le=60)
+    video_buffer_max_bytes_per_camera: int = Field(default=32 * 2**20, ge=2**20)
+    storage_max_bytes: int = Field(default=1024 * 2**20, ge=2**20)
+    storage_min_free_bytes: int = Field(default=100 * 2**20, ge=0)
+    clip_fps: int = Field(default=10, ge=1, le=15)
+    clip_width: int = Field(default=1280, ge=160, le=1920)
+    clip_retention_days: int = Field(default=7, ge=1, le=365)
+    clip_max_pending: int = Field(default=32, ge=1, le=128)
+    clip_encode_timeout_seconds: float = Field(default=45, ge=1, le=120)
 
     @model_validator(mode="after")
     def tracker_thresholds(self):
@@ -130,6 +143,8 @@ class Settings(BaseSettings):
         "face_model_dir",
         "reference_dir",
         "event_dir",
+        "clip_dir",
+        "clip_buffer_dir",
         "video_dir",
         "log_dir",
         "gpu_report_path",

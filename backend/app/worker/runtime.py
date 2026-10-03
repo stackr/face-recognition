@@ -29,10 +29,13 @@ class Frame:
 
 
 class CameraRun:
-    def __init__(self, camera_id, source, source_type, loop, settings, actual_device=None):
+    def __init__(
+        self, camera_id, source, source_type, loop, settings, actual_device=None, clips=None
+    ):
         self.camera_id, self.source, self.source_type = camera_id, source, source_type
         self.loop, self.settings = loop, settings
         self.actual_device = actual_device
+        self.clips = clips
         self.lock = threading.RLock()
         self.cancel = threading.Event()
         self.stream_session_id = uuid.uuid4().hex
@@ -71,6 +74,8 @@ class CameraRun:
         except Exception:
             self.fail("capture_failed")
         finally:
+            if self.clips:
+                self.clips.end_session(self.camera_id, self.stream_session_id)
             with self.lock:
                 self.source = ""  # Erase credentials after the capture thread exits.
                 if self.state == "stopping":
@@ -81,6 +86,8 @@ class CameraRun:
     def clear_session(self, *, rotate=False):
         # Caller holds run.lock; replacing both objects drops candidates and all
         # per-track state, including event submission cooldowns.
+        if self.clips:
+            self.clips.end_session(self.camera_id, self.stream_session_id)
         if rotate:
             self.stream_session_id = uuid.uuid4().hex
             self.session_captured = self.session_processed = 0
@@ -100,9 +107,12 @@ class CameraRun:
             self.resolution = [image.shape[1], image.shape[0]]
             self.last_frame_at = datetime.now(UTC).isoformat()
             self.last_frame_mono = now
-            self.latest = Frame(
+            frame = self.latest = Frame(
                 image, self.stream_session_id, self.session_captured, self.last_frame_at, now
             )
+
+        if self.clips:
+            self.clips.offer(self.camera_id, frame)
 
     def retry(self, code):
         with self.lock:
@@ -307,6 +317,7 @@ class WorkerRuntime:
         self.gallery = gallery
         self.events = events
         self.diagnostics = None
+        self.clips = None
         self.sampling_revision = sampling_revision
         self.pending_sampling = None
         self.commands = Queue(maxsize=2)
@@ -372,6 +383,7 @@ class WorkerRuntime:
                 loop,
                 self.settings,
                 self.detector.info["actual_device"],
+                self.clips,
             )
             self.runs[camera_id] = run
             self.runs.move_to_end(camera_id)
@@ -580,6 +592,8 @@ class WorkerRuntime:
             raise
 
     def close(self):
+        if self.clips:
+            self.clips.close()
         self.cancel.set()
         with self.lock:
             runs = list(self.runs.values())

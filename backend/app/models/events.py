@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.foundation import Base, utc_now
@@ -46,6 +46,10 @@ class MatchEvent(Base):
     face_image_path: Mapped[str | None] = mapped_column(String(64))
     frame_image_path: Mapped[str | None] = mapped_column(String(64))
     video_clip_path: Mapped[str | None] = mapped_column(String(64))
+    clip_state: Mapped[str] = mapped_column(String(16), default="disabled", nullable=False)
+    clip_error: Mapped[str | None] = mapped_column(String(40))
+    clip_details: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    clip_expires_at: Mapped[datetime | None] = mapped_column(DateTime, index=True)
     status: Mapped[str] = mapped_column(String(16), default="candidate", nullable=False)
     change_id: Mapped[int] = mapped_column(Integer, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)

@@ -33,7 +33,8 @@ def test_invalid_configuration_hides_secret_values():
 
 
 def test_public_health_and_private_endpoints(client):
-    assert client.get("/api/health").json() == {"status": "ok", "phase": 7}
+    health = client.get("/api/health").json()
+    assert health["status"] == "ok" and health["phase"] >= 8
     for path in ["/api/auth/me", "/api/cameras", "/api/system/status"]:
         assert client.get(path).status_code == 401
 
