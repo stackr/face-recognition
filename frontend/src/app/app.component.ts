@@ -1,6 +1,6 @@
 import { CommonModule } from '@angular/common';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
-import { Component, inject, signal, OnDestroy } from '@angular/core';
+import { Component, computed, inject, signal, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom, timeout } from 'rxjs';
 import { FaceCropperComponent } from './face-cropper.component';
@@ -12,6 +12,7 @@ interface Camera {
   camera_id: number; name: string; description: string; rtsp_url: string;
   location: string; enabled: boolean; created_at: string; updated_at: string;
   source_type: 'rtsp' | 'mp4'; has_test_video: boolean;
+  can_view: boolean; can_operate: boolean;
 }
 interface CameraForm { name: string; description: string; rtsp_url: string; location: string; enabled: boolean; source_type: 'rtsp' | 'mp4'; }
 interface Match {person_id: number; name: string; face_id: number; similarity: number; candidate?: boolean;}
@@ -31,6 +32,7 @@ interface AnalysisStatus {
   latency_p95_ms?: number; resolution?: number[]; result?: {tracks: AnalysisTrack[]};
   face_analysis_fps?: number; face_roi_fps?: number; face_counts?: {embeddings_created?: number; faces_detected?: number};
   actual_device?: string; reconnect_attempts?: number; reconnects?: number;
+  loop?: boolean;
   next_retry_seconds?: number | null; last_frame_at?: string; last_frame_age_seconds?: number;
 }
 interface SystemStatus {
@@ -54,6 +56,17 @@ export class AppComponent implements OnDestroy {
   view = signal<'dashboard' | 'cameras' | 'persons' | 'person-editor' | 'live'>('dashboard');
   status = signal<SystemStatus | null>(null);
   cameras = signal<Camera[]>([]);
+  cameraSearch = signal('');
+  viewableCameras = computed(() => this.cameras().filter(camera => camera.can_view));
+  liveCameras = computed(() => {
+    const query = this.cameraSearch().trim().toLocaleLowerCase();
+    return this.viewableCameras().filter(camera => !query
+      || `${camera.name} ${camera.location}`.toLocaleLowerCase().includes(query));
+  });
+  private camerasLoaded = false;
+  private liveRouteId: number | null = null;
+  private liveVersion = 0;
+  private sessionVersion = 0;
   persons = signal<Person[]>([]);
   selectedPerson = signal<Person | null>(null);
   personLoading = signal(false);
@@ -91,7 +104,10 @@ export class AppComponent implements OnDestroy {
   private pollTimer = window.setInterval(() => {
     if (this.user() && this.selectedCamera() && this.view() === 'live') this.refreshAnalysis();
   }, 2000);
-  ngOnDestroy() { window.clearInterval(this.pollTimer); window.removeEventListener('hashchange', this.routeChanged); }
+  private metadataTimer = window.setInterval(() => {
+    if (this.user() && this.view() === 'live') this.refresh();
+  }, 30000);
+  ngOnDestroy() { window.clearInterval(this.pollTimer); window.clearInterval(this.metadataTimer); window.removeEventListener('hashchange', this.routeChanged); }
 
   constructor() {
     window.addEventListener('hashchange', this.routeChanged);
@@ -106,10 +122,11 @@ export class AppComponent implements OnDestroy {
 
   emptyForm(): CameraForm { return {name: '', description: '', rtsp_url: '', location: '', enabled: true, source_type: 'rtsp'}; }
   headers() { return {'X-CSRF-Token': this.csrf}; }
-  acceptAuth(auth: Auth) { this.csrf = auth.csrf_token; this.user.set(auth.user); this.refresh(); this.applyRoute(); }
+  acceptAuth(auth: Auth) { this.sessionVersion++; this.csrf = auth.csrf_token; this.user.set(auth.user); this.refresh(); this.applyRoute(); }
 
   navigate(path: string) {
     if (this.busy()) return;
+    if (path === 'live' && this.selectedCamera()) path = `live/${this.selectedCamera()!.camera_id}`;
     window.history.pushState(null, '', `#/${path}`);
     this.applyRoute();
   }
@@ -118,9 +135,12 @@ export class AppComponent implements OnDestroy {
     this.currentHash = window.location.hash;
     if (!this.user()) return;
     this.resetPersonEditor(); this.error.set(''); this.notice.set('');
+    this.liveVersion++; this.statusPending = false;
     window.scrollTo(0, 0);
     const path = this.currentHash.replace(/^#\/?/, '');
     const detail = /^persons\/([1-9]\d*)\/(edit|view)$/.exec(path);
+    const live = /^live(?:\/([1-9]\d*))?$/.exec(path);
+    this.liveRouteId = live?.[1] ? Number(live[1]) : null;
     if (path === 'persons/new' || detail) {
       this.view.set('person-editor');
       if (!detail) {
@@ -147,16 +167,22 @@ export class AppComponent implements OnDestroy {
         }
       });
     } else {
-      this.view.set(path === 'persons' || path === 'cameras' || path === 'live' ? path : 'dashboard');
+      this.view.set(live ? 'live' : path === 'persons' || path === 'cameras' ? path : 'dashboard');
       if (path === 'persons') this.refreshPersons();
-      if (path === 'live') this.refreshAnalysis();
+      if (live && this.camerasLoaded) {
+        // A camera may have been added in another tab since this list was loaded.
+        if (this.liveRouteId === null || this.viewableCameras().some(camera => camera.camera_id === this.liveRouteId)) {
+          this.restoreLiveCamera();
+        }
+        this.refresh();
+      }
     }
   }
 
   pageTitle() {
     if (this.view() === 'person-editor') return this.user()?.role === 'admin'
       ? (this.personEditingId === null ? '인물 추가' : '인물 수정') : '인물 정보';
-    return {dashboard:'시스템 준비 상태', cameras:'카메라 관리', persons:'인물 관리', live:'영상 분석'}[this.view() as 'dashboard' | 'cameras' | 'persons' | 'live'];
+    return {dashboard:'시스템 준비 상태', cameras:'카메라 관리', persons:'인물 관리', live:'Live Search'}[this.view() as 'dashboard' | 'cameras' | 'persons' | 'live'];
   }
 
   login() {
@@ -177,7 +203,7 @@ export class AppComponent implements OnDestroy {
     });
   }
 
-  clearSession() { this.resetPersonEditor(); this.user.set(null); this.csrf = ''; this.cameras.set([]); this.persons.set([]); this.status.set(null); this.selectedCamera.set(null); this.analysis.set(null); this.error.set(''); this.notice.set(''); }
+  clearSession() { this.sessionVersion++; this.liveVersion++; this.statusPending = false; this.camerasLoaded = false; this.resetPersonEditor(); this.user.set(null); this.csrf = ''; this.cameras.set([]); this.persons.set([]); this.status.set(null); this.selectedCamera.set(null); this.analysis.set(null); this.cameraSearch.set(''); this.error.set(''); this.notice.set(''); }
 
   handleError(err: HttpErrorResponse) {
     if (err.status === 401) { this.clearSession(); this.error.set('세션이 만료되었습니다. 다시 로그인해 주세요.'); }
@@ -185,20 +211,25 @@ export class AppComponent implements OnDestroy {
   }
 
   refresh() {
+    const version = this.sessionVersion;
     this.error.set('');
     this.refreshPersons();
     this.http.get<SystemStatus>('/api/system/status').pipe(timeout(8000)).subscribe({
-      next: value => this.status.set(value), error: err => this.handleError(err)
+      next: value => {if (version === this.sessionVersion && this.user()) this.status.set(value);},
+      error: err => {if (version === this.sessionVersion) this.handleError(err);}
     });
     this.http.get<Camera[]>('/api/cameras').pipe(timeout(8000)).subscribe({
       next: value => {
+        if (version !== this.sessionVersion || !this.user()) return;
         this.cameras.set(value);
+        this.camerasLoaded = true;
         const selected = this.selectedCamera();
         if (selected) {
-          this.selectedCamera.set(value.find(camera => camera.camera_id === selected.camera_id) || null);
+          this.selectedCamera.set(value.find(camera => camera.camera_id === selected.camera_id && camera.can_view) || null);
           if (!this.selectedCamera()) this.analysis.set(null);
         }
-      }, error: err => this.handleError(err)
+        if (this.view() === 'live') this.restoreLiveCamera();
+      }, error: err => {if (version === this.sessionVersion) this.handleError(err);}
     });
   }
 
@@ -209,11 +240,13 @@ export class AppComponent implements OnDestroy {
   }
 
   refreshPersons() {
+    const version = this.sessionVersion;
     this.http.get<Person[]>('/api/persons').subscribe({next: value => {
+      if (version !== this.sessionVersion || !this.user()) return;
       this.persons.set(value);
       const selected = this.selectedPerson();
       if (selected) this.selectedPerson.set(value.find(person => person.id === selected.id) || null);
-    }, error: err => this.handleError(err)});
+    }, error: err => {if (version === this.sessionVersion) this.handleError(err);}});
   }
   openPersonPage(person: Person | null = null) {
     this.navigate(person ? `persons/${person.id}/${this.user()?.role === 'admin' ? 'edit' : 'view'}` : 'persons/new');
@@ -359,9 +392,23 @@ export class AppComponent implements OnDestroy {
   }
 
   openLive(camera: Camera) {
-    this.selectedCamera.set(camera); this.analysis.set(null); this.previewFailed.set(false);
-    this.analysisSource = camera.source_type; this.error.set(''); this.notice.set('');
-    this.navigate('live'); this.refreshAnalysis();
+    if (!camera.can_view || this.busy()) return;
+    this.navigate(`live/${camera.camera_id}`);
+  }
+  private restoreLiveCamera() {
+    const id = this.liveRouteId ?? this.selectedCamera()?.camera_id;
+    const camera = this.cameras().find(value => value.camera_id === id && value.can_view);
+    if (!camera) {
+      this.selectedCamera.set(null); this.analysis.set(null);
+      if (this.liveRouteId !== null) this.error.set('카메라를 찾을 수 없거나 영상 접근 권한이 없습니다. 목록에서 다시 선택해 주세요.');
+      return;
+    }
+    if (this.selectedCamera()?.camera_id !== camera.camera_id) {
+      this.liveVersion++; this.statusPending = false;
+      this.selectedCamera.set(camera); this.analysis.set(null); this.previewFailed.set(false);
+      this.analysisSource = camera.source_type;
+    }
+    this.refreshAnalysis();
   }
   selectLive(id: string | number) {
     const camera = this.cameras().find(value => value.camera_id === Number(id));
@@ -370,9 +417,11 @@ export class AppComponent implements OnDestroy {
   refreshAnalysis() {
     const camera = this.selectedCamera();
     if (!camera || this.statusPending) return;
+    const version = this.liveVersion;
     this.statusPending = true;
     this.http.get<AnalysisStatus>(`/api/cameras/${camera.camera_id}/status`).pipe(timeout(12000)).subscribe({
       next: value => {
+        if (version !== this.liveVersion || !this.user()) return;
         if (this.selectedCamera()?.camera_id === camera.camera_id) {
           const previous = this.analysis();
           if (value.stream_session_id && value.stream_session_id !== previous?.stream_session_id) {
@@ -380,15 +429,23 @@ export class AppComponent implements OnDestroy {
           }
           if (value.state === 'running' && previous?.state !== 'running') this.previewFailed.set(false);
           this.analysis.set(value);
+          if (this.activeAnalysis() && (value.source_type === 'mp4' || value.source_type === 'rtsp')) {
+            this.analysisSource = value.source_type; this.loopVideo = value.loop ?? this.loopVideo;
+          }
         }
         this.statusPending = false;
       },
-      error: err => { this.statusPending = false; this.handleError(err); }
+      error: err => {
+        if (version !== this.liveVersion || !this.user()) return;
+        this.statusPending = false;
+        if (err.status === 403 || err.status === 404) {this.selectedCamera.set(null); this.analysis.set(null);}
+        this.handleError(err);
+      }
     });
   }
   activeAnalysis() { return ['opening', 'running', 'reconnecting', 'draining', 'stopping'].includes(this.analysis()?.state || ''); }
   startAnalysis() {
-    const camera = this.selectedCamera(); if (!camera || this.busy()) return;
+    const camera = this.selectedCamera(); if (!camera?.can_operate || this.busy()) return;
     this.busy.set(true); this.error.set(''); this.notice.set(''); this.previewFailed.set(false);
     this.http.post<AnalysisStatus>(`/api/cameras/${camera.camera_id}/start`, {source_type:this.analysisSource, loop:this.loopVideo}, {headers:this.headers()})
       .pipe(timeout(15000)).subscribe({
@@ -397,7 +454,7 @@ export class AppComponent implements OnDestroy {
       });
   }
   stopAnalysis() {
-    const camera = this.selectedCamera(); if (!camera || this.busy()) return;
+    const camera = this.selectedCamera(); if (!camera?.can_operate || this.busy()) return;
     this.busy.set(true);
     this.http.post<AnalysisStatus>(`/api/cameras/${camera.camera_id}/stop`, {}, {headers:this.headers()}).pipe(timeout(30000)).subscribe({
       next: value => { this.analysis.set(value); this.busy.set(false); this.notice.set('분석을 중지했습니다.'); },
@@ -420,6 +477,7 @@ export class AppComponent implements OnDestroy {
   faceUrl(track: AnalysisTrack) {
     return `/api/cameras/${this.selectedCamera()?.camera_id}/faces/${track.track_id}?stream_session_id=${this.analysis()?.stream_session_id}&v=${track.face?.best?.frame_id}`;
   }
+  candidateCount() {return (this.analysis()?.result?.tracks || []).filter(track => track.face?.matches?.length).length;}
   faceLabel(face?: FaceStatus) {
     if (face?.embedding_ready) return '얼굴 특징 준비됨';
     const labels: Record<string,string> = {pending:'얼굴 검사 대기', no_face:'얼굴이 보이지 않음', ambiguous:'얼굴 연결 보류', rejected:'품질 기준 미달', capacity:'얼굴 검사 대기'};

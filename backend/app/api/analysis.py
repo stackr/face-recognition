@@ -212,7 +212,7 @@ async def upload(
             old = (directory / old_path).resolve()
             if old.parent == directory and old != path:
                 old.unlink(missing_ok=True)
-        return output(camera, request)
+        return output(camera, request, db, user)
 
 
 def preview_access(request, camera_id):

@@ -78,5 +78,7 @@ class CameraOutput(BaseModel):
     has_test_video: bool
     location: str
     enabled: bool
+    can_view: bool
+    can_operate: bool
     created_at: datetime
     updated_at: datetime

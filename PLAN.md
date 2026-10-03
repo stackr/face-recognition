@@ -1016,4 +1016,8 @@ Phase 6 **서비스 반영과 실제 CUDA 파이프라인 검증 완료**: 에�
 
 2026-10-03 권한 변경 후 **Phase 6 전체 회귀·브라우저 검증 완료**: 에이전트에서 DB/localhost/asyncio/Chrome 접근이 정상임을 확인했다. 전체 backend 91건과 실제 MariaDB 통합 1건을 통과했으며 실제 migration head는 `0005_match_events`다. Chrome 첫 실행에서 얼굴 Blob 전송 데이터 읽기와 WebSocket 한쪽만 닫는 테스트 코드 문제를 수정한 뒤 전체 E2E 7건을 통과했다. 실제 얼굴 크롭 JPEG 180×240 전송·112×112 등록 사진, 신규/수정/취소/재등록, RTSP 중단/복구, 이벤트 확인·거부, WebSocket 중단 중 저장한 검토의 HTTP cursor 복구·새로고침·모바일 표시·로그아웃을 확인했다. frontend 논리 테스트 12건·애플리케이션 타입 검사·production build(529.81 kB)·Ruff도 통과했다. 기존 카메라 2개·인물 3명·얼굴 2개·계정 1개와 카메라 실행 상태를 보존했고 임시 자료를 정리했다. 최종 결과는 `data/reports/phase6-regression.json`, 자세한 범위는 [Phase 6 결과](docs/phase6-report.md)에 기록했다. 이전 접근 제한 기록은 과거 시도의 결과다.
 
-다음 개발 범위는 Phase 7 전체 Live Search UI다. clip recording과 다중 camera 최적화는 각각 Phase 8/9 범위다.
+Phase 6 검증 후 다음 개발 범위는 Phase 7 전체 Live Search UI로 정했다. clip recording과 다중 camera 최적화는 각각 Phase 8/9 범위다.
+
+2026-10-03 Phase 7 Angular Live Search UI: 왼쪽 조회 가능한 CCTV 목록/이름·위치 검색, 중앙 인증된 영상/person bbox/track ID/추적별 후보 강조·후보 수 및 분석 조작, 오른쪽 실시간 MatchEvent/현재 등록 얼굴·검출 얼굴 비교와 확인·거부를 제공한다. 카메라 범위/인물 이름/상태 필터는 최근 100건의 표시만 바꾸며 WebSocket/HTTP 변경 cursor 복구를 유지한다. 큰 화면의 3열과 390 px 모바일, `#/live/{camera_id}`의 직접 진입·새로고침·뒤로 가기 복원, 만료·삭제 사진 안내와 로그인 이후 늦은 응답 차단을 구현했다. 현재 계정의 can_view/can_operate를 카메라 API에 추가하여 목록·조작 버튼을 표시하고 기존 서버 grant/CSRF 검사를 유지한다. backend만 재시작하여 Phase 7 서비스 반영을 확인했고 worker/GPU/모델/DB migration/의존성은 변경하지 않았다. 인물 관리 메뉴의 마지막 위치와 기존 크롭/등록 흐름을 유지한다. backend 96건, 실제 DB 통합 1건과 frontend 논리 16건·타입 검사·Angular production build·Ruff를 통과했다. 전체 Chrome 8건을 실패/건너뜀/재시도 없이 통과하여 실제 CUDA 후보·두 사진·필터·카메라 전환·URL 복원·모바일·로그아웃을 검증했다. 시험 전후 기존 카메라 2개·인물 3명·얼굴 2개·계정 1개의 ID와 카메라 실행 상태가 일치했고 임시 자료를 정리했다. 최종 결과는 data/reports/phase7-regression.json에 status=passed로 저장했으며 자세한 결과는 [Phase 7 결과](docs/phase7-report.md)에 기록했다.
+
+다음 개발 범위는 Phase 8 이벤트 전후 영상 클립이다. 비상업 시험 목적과 기존 모델 이용 조건을 유지한다.

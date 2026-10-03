@@ -21,9 +21,9 @@
   </main>
 } @else {
   <div class="app-layout">
-    <nav class="sidebar" aria-label="주 메뉴"><div class="nav-caption">WORKSPACE</div><button [class.active]="view() === 'dashboard'" (click)="navigate('dashboard')" [disabled]="busy()">▦ &nbsp; 대시보드</button><button [class.active]="view() === 'cameras'" (click)="navigate('cameras')" [disabled]="busy()">▣ &nbsp; 카메라 관리</button><button [class.active]="view() === 'live'" (click)="navigate('live')" [disabled]="busy()">▷ &nbsp; 영상 분석</button><button [class.active]="view() === 'persons' || view() === 'person-editor'" (click)="navigate('persons')" [disabled]="busy()">◎ &nbsp; 인물 관리</button><div class="sidebar-note">시험 환경<br><span>사람 탐지 · 카메라별 추적</span></div></nav>
-    <main class="workspace">
-      <div class="page-heading"><div><div class="eyebrow">{{ view() === 'person-editor' ? 'TARGET PERSON' : 'OVERVIEW' }}</div><h1>{{ pageTitle() }}</h1><p>{{ view() === 'dashboard' ? '서비스 연결과 최근 GPU 검증 결과를 확인하세요.' : view() === 'cameras' ? '시험에 사용할 CCTV와 MP4 카메라를 관리하세요.' : (view() === 'persons' || view() === 'person-editor') ? '검색할 인물과 얼굴 사진을 등록하고 시험 비교를 진행하세요.' : '카메라 영상에서 사람과 얼굴 후보를 확인하세요.' }}</p></div><div class="page-heading-actions">@if (view() === 'person-editor') {<button class="btn btn-outline-secondary" (click)="navigate('persons')" [disabled]="busy()">목록으로</button>}<button class="btn btn-outline-secondary" (click)="refreshPage()" [disabled]="busy()">새로고침</button></div></div>
+    <nav class="sidebar" aria-label="주 메뉴"><div class="nav-caption">WORKSPACE</div><button [class.active]="view() === 'dashboard'" (click)="navigate('dashboard')" [disabled]="busy()">▦ &nbsp; 대시보드</button><button [class.active]="view() === 'cameras'" (click)="navigate('cameras')" [disabled]="busy()">▣ &nbsp; 카메라 관리</button><button [class.active]="view() === 'live'" (click)="navigate('live')" [disabled]="busy()">▷ &nbsp; Live Search</button><button [class.active]="view() === 'persons' || view() === 'person-editor'" (click)="navigate('persons')" [disabled]="busy()">◎ &nbsp; 인물 관리</button><div class="sidebar-note">시험 환경<br><span>사람 탐지 · 카메라별 추적</span></div></nav>
+    <main class="workspace" [class.live-workspace]="view() === 'live'">
+      <div class="page-heading"><div><div class="eyebrow">{{ view() === 'person-editor' ? 'TARGET PERSON' : 'OVERVIEW' }}</div><h1>{{ pageTitle() }}</h1><p>{{ view() === 'dashboard' ? '서비스 연결과 최근 GPU 검증 결과를 확인하세요.' : view() === 'cameras' ? '시험에 사용할 CCTV와 MP4 카메라를 관리하세요.' : (view() === 'persons' || view() === 'person-editor') ? '검색할 인물과 얼굴 사진을 등록하고 시험 비교를 진행하세요.' : '카메라 영상과 실시간 검색 후보를 함께 확인하세요.' }}</p></div><div class="page-heading-actions">@if (view() === 'person-editor') {<button class="btn btn-outline-secondary" (click)="navigate('persons')" [disabled]="busy()">목록으로</button>}<button class="btn btn-outline-secondary" (click)="refreshPage()" [disabled]="busy()">새로고침</button></div></div>
       @if (error()) {<div class="alert alert-danger" role="alert">{{ error() }}</div>}
       @if (notice()) {<div class="alert alert-info" role="status">{{ notice() }}</div>}
       @if (view() === 'dashboard') {
@@ -39,7 +39,7 @@
         }
         <section class="card camera-list"><div class="d-flex align-items-center justify-content-between"><h2>카메라 목록</h2><span class="badge text-bg-light">{{ cameras().length }}대</span></div>
           @if (!cameras().length) {<div class="empty-state">등록된 카메라가 없습니다.<br><small>관리자 계정으로 첫 카메라를 등록하세요.</small></div>} @else {
-            <div class="table-responsive"><table class="table align-middle"><thead><tr><th>이름</th><th>위치</th><th>연결 주소</th><th>사용</th><th>영상</th>@if (user()?.role === 'admin') {<th>관리</th>}</tr></thead><tbody>@for (camera of cameras(); track camera.camera_id) {<tr><td class="fw-semibold">{{ camera.name }}</td><td>{{ camera.location || '—' }}</td><td class="camera-url">{{ camera.source_type === 'mp4' ? 'MP4 시험 영상' : camera.rtsp_url }}</td><td><span class="badge" [class.text-bg-success]="camera.enabled" [class.text-bg-secondary]="!camera.enabled">{{ camera.enabled ? '사용' : '중지' }}</span></td><td><button class="btn btn-sm btn-primary" (click)="openLive(camera)">영상 분석</button></td>@if (user()?.role === 'admin') {<td class="text-nowrap"><button class="btn btn-sm btn-outline-secondary me-2" (click)="edit(camera)">수정</button><button class="btn btn-sm btn-outline-danger" (click)="deleteCamera(camera)">삭제</button></td>}</tr>}</tbody></table></div>
+            <div class="table-responsive"><table class="table align-middle"><thead><tr><th>이름</th><th>위치</th><th>연결 주소</th><th>사용</th><th>영상</th>@if (user()?.role === 'admin') {<th>관리</th>}</tr></thead><tbody>@for (camera of cameras(); track camera.camera_id) {<tr><td class="fw-semibold">{{ camera.name }}</td><td>{{ camera.location || '—' }}</td><td class="camera-url">{{ camera.source_type === 'mp4' ? 'MP4 시험 영상' : camera.rtsp_url }}</td><td><span class="badge" [class.text-bg-success]="camera.enabled" [class.text-bg-secondary]="!camera.enabled">{{ camera.enabled ? '사용' : '중지' }}</span></td><td><button class="btn btn-sm btn-primary" (click)="openLive(camera)" [disabled]="busy() || !camera.can_view">영상 분석</button></td>@if (user()?.role === 'admin') {<td class="text-nowrap"><button class="btn btn-sm btn-outline-secondary me-2" (click)="edit(camera)">수정</button><button class="btn btn-sm btn-outline-danger" (click)="deleteCamera(camera)">삭제</button></td>}</tr>}</tbody></table></div>
           }
         </section>
       } @else if (view() === 'persons') {
@@ -109,15 +109,32 @@
           }
         </div>
       } @else {
+        <div class="live-search-layout">
+        <aside class="card live-camera-list" aria-label="Live Search 카메라 목록">
+          <div class="live-camera-heading"><div class="eyebrow">CAMERAS</div><h2>CCTV 목록</h2></div>
+          <label for="live-camera-search" class="form-label">카메라 찾기</label>
+          <input id="live-camera-search" type="search" class="form-control form-control-sm" [ngModel]="cameraSearch()" (ngModelChange)="cameraSearch.set($event)" maxlength="120" placeholder="이름 또는 위치">
+          <small class="live-camera-total">{{ liveCameras().length }}대 · 조회 가능한 카메라</small>
+          <div class="live-camera-items">
+            @for (camera of liveCameras(); track camera.camera_id) {
+              <button type="button" class="live-camera-item" [class.selected]="selectedCamera()?.camera_id === camera.camera_id" [attr.aria-pressed]="selectedCamera()?.camera_id === camera.camera_id" (click)="openLive(camera)" [disabled]="busy()">
+                <strong>{{ camera.name }}</strong><small>{{ camera.location || '위치 미등록' }}</small>
+                <span class="live-camera-meta"><span>{{ camera.source_type === 'mp4' ? 'MP4' : 'CCTV' }}</span><span>{{ !camera.enabled ? '사용 안 함' : selectedCamera()?.camera_id === camera.camera_id ? analysisLabel() : '사용' }}</span></span>
+                @if (!camera.can_operate) {<small>조회 전용</small>}
+              </button>
+            } @empty {<p class="live-camera-empty">{{ cameraSearch() ? '검색 결과가 없습니다.' : '조회 가능한 카메라가 없습니다.' }}</p>}
+          </div>
+        </aside>
+        <div class="live-main">
         <section class="card analysis-controls">
           <label for="live-camera" class="form-label">분석할 카메라</label>
-          <select id="live-camera" class="form-select" [ngModel]="selectedCamera()?.camera_id ?? null" (ngModelChange)="selectLive($event)"><option [ngValue]="null" disabled>카메라를 선택하세요</option>@for (camera of cameras(); track camera.camera_id) {<option [ngValue]="camera.camera_id">{{ camera.name }}</option>}</select>
+          <select id="live-camera" class="form-select" [ngModel]="selectedCamera()?.camera_id ?? null" (ngModelChange)="selectLive($event)" [disabled]="busy()"><option [ngValue]="null" disabled>카메라를 선택하세요</option>@for (camera of viewableCameras(); track camera.camera_id) {<option [ngValue]="camera.camera_id">{{ camera.name }}</option>}</select>
           @if (selectedCamera(); as camera) {
             <div class="analysis-actions">
               <label for="analysis-source" class="form-label mb-0">분석 입력</label><select id="analysis-source" class="form-select source-select" [(ngModel)]="analysisSource" [disabled]="activeAnalysis() || busy()">@if (camera.source_type === 'rtsp') {<option value="rtsp">등록된 CCTV</option>}<option value="mp4" [disabled]="!camera.has_test_video">업로드한 MP4</option></select>
               @if (analysisSource === 'mp4') {<label class="form-check mb-0"><input type="checkbox" class="form-check-input" [(ngModel)]="loopVideo" [disabled]="activeAnalysis()"><span class="form-check-label">반복 재생</span></label>}
-              @if (user()?.role !== 'viewer') {<button class="btn btn-primary" (click)="startAnalysis()" [disabled]="busy() || activeAnalysis() || !camera.enabled || (analysisSource === 'mp4' && !camera.has_test_video)">분석 시작</button><button class="btn btn-outline-secondary" (click)="stopAnalysis()" [disabled]="busy() || !activeAnalysis()">분석 중지</button>}
-              <span class="analysis-state" [class.running]="analysis()?.state === 'running'">{{ analysisLabel() }}</span>
+              @if (camera.can_operate) {<button class="btn btn-primary" (click)="startAnalysis()" [disabled]="busy() || activeAnalysis() || !camera.enabled || (analysisSource === 'mp4' && !camera.has_test_video)">분석 시작</button><button class="btn btn-outline-secondary" (click)="stopAnalysis()" [disabled]="busy() || !activeAnalysis()">분석 중지</button>}
+              <span class="analysis-state" [class.running]="analysis()?.state === 'running'">{{ analysisLabel() }}</span>@if (!camera.can_operate) {<small class="text-secondary">조회 전용 · 분석 조작 권한 없음</small>}
             </div>
             @if (user()?.role === 'admin') {<div class="video-upload"><label for="mp4-upload" class="form-label">시험 MP4 업로드</label><input id="mp4-upload" type="file" accept="video/mp4,.mp4" class="form-control" (change)="uploadVideo($event)" [disabled]="busy() || activeAnalysis()"><small class="text-secondary">200 MB 이하 · CCTV 주소를 유지한 채 시험 영상을 사용할 수 있습니다. 분석을 중지한 후 업로드하세요.</small></div>}
           }
@@ -130,18 +147,18 @@
           @if (analysis()?.state === 'reconnecting') {<div class="alert alert-info reconnect-notice" role="status">영상 연결이 끊겼습니다. {{ reconnectLabel() }} 이전 영상과 얼굴 정보는 표시하지 않습니다.</div>}
           <div class="live-grid">
             <section class="card preview-card"><div class="preview-heading"><h2>{{ selectedCamera()!.name }}</h2>@if (activeAnalysis()) {<button class="btn btn-sm btn-outline-secondary" (click)="reconnectPreview()">미리보기 다시 연결</button>}</div>
-              <div class="preview-screen">
+              <div class="live-legend"><span>사람 박스 · 추적 번호</span><span class="candidate-count">유사도 후보 {{ candidateCount() }}명</span></div><div class="preview-screen">
                 @if ((analysis()?.state === 'running' || analysis()?.state === 'draining') && !previewFailed()) {<img [src]="previewUrl()" alt="사람 탐지와 추적 번호가 표시된 카메라 영상" (error)="previewFailed.set(true)">} @else {<div class="preview-placeholder">{{ analysis()?.state === 'reconnecting' ? '영상 재연결을 기다리고 있습니다.' : previewFailed() ? '미리보기 연결이 종료되었습니다. 다시 연결해 주세요.' : analysisLabel() }}<small>분석을 시작하면 영상에 사람 박스와 추적 번호가 표시됩니다.</small></div>}
               </div><p class="preview-caption">추적 번호는 현재 카메라의 영상 세션 안에서만 유효합니다. 품질을 통과한 얼굴을 등록 인물과 비교합니다. 유사도 후보는 인물 확인을 의미하지 않습니다.</p>
             </section>
-            <aside class="card metrics-card"><div class="card-label">LIVE METRICS</div><h2>분석 상태</h2><dl><dt>사람 수</dt><dd>{{ analysis()?.result?.tracks?.length || 0 }}명</dd><dt>처리 장치</dt><dd>{{ analysis()?.actual_device || '—' }}</dd><dt>재연결 시도</dt><dd>{{ analysis()?.reconnect_attempts ?? 0 }}회</dd><dt>재연결 성공</dt><dd>{{ analysis()?.reconnects ?? 0 }}회</dd><dt>최근 프레임</dt><dd>{{ analysis()?.last_frame_at ? (analysis()!.last_frame_at | date:'HH:mm:ss') : '—' }}</dd><dt>입력 해상도</dt><dd>{{ analysis()?.resolution?.join(' × ') || '—' }}</dd><dt>수신 FPS</dt><dd>{{ analysis()?.capture_fps ?? '—' }}</dd><dt>탐지 FPS</dt><dd>{{ analysis()?.detection_fps ?? '—' }}</dd><dt>얼굴 검사 FPS</dt><dd>{{ analysis()?.face_analysis_fps ?? 0 }}</dd><dt>얼굴 ROI / 초</dt><dd>{{ analysis()?.face_roi_fps ?? 0 }}</dd><dt>특징 생성</dt><dd>{{ analysis()?.face_counts?.embeddings_created ?? 0 }}회</dd><dt>처리 프레임</dt><dd>{{ analysis()?.processed_frames ?? 0 }}</dd><dt>건너뛴 프레임</dt><dd>{{ analysis()?.dropped_frames ?? 0 }}</dd><dt>처리 지연 P95</dt><dd>{{ analysis()?.latency_p95_ms ?? '—' }} ms</dd></dl><small>2초마다 갱신 · 최신 프레임을 우선 처리합니다. 지연은 서버 수신부터 분석·JPEG 생성까지의 시간입니다.</small></aside>
+            <details class="card metrics-card"><summary>상세 분석 지표</summary><div class="card-label">LIVE METRICS</div><h2>분석 상태</h2><dl><dt>사람 수</dt><dd>{{ analysis()?.result?.tracks?.length || 0 }}명</dd><dt>처리 장치</dt><dd>{{ analysis()?.actual_device || '—' }}</dd><dt>재연결 시도</dt><dd>{{ analysis()?.reconnect_attempts ?? 0 }}회</dd><dt>재연결 성공</dt><dd>{{ analysis()?.reconnects ?? 0 }}회</dd><dt>최근 프레임</dt><dd>{{ analysis()?.last_frame_at ? (analysis()!.last_frame_at | date:'HH:mm:ss') : '—' }}</dd><dt>입력 해상도</dt><dd>{{ analysis()?.resolution?.join(' × ') || '—' }}</dd><dt>수신 FPS</dt><dd>{{ analysis()?.capture_fps ?? '—' }}</dd><dt>탐지 FPS</dt><dd>{{ analysis()?.detection_fps ?? '—' }}</dd><dt>얼굴 검사 FPS</dt><dd>{{ analysis()?.face_analysis_fps ?? 0 }}</dd><dt>얼굴 ROI / 초</dt><dd>{{ analysis()?.face_roi_fps ?? 0 }}</dd><dt>특징 생성</dt><dd>{{ analysis()?.face_counts?.embeddings_created ?? 0 }}회</dd><dt>처리 프레임</dt><dd>{{ analysis()?.processed_frames ?? 0 }}</dd><dt>건너뛴 프레임</dt><dd>{{ analysis()?.dropped_frames ?? 0 }}</dd><dt>처리 지연 P95</dt><dd>{{ analysis()?.latency_p95_ms ?? '—' }} ms</dd></dl><small>2초마다 갱신 · 최신 프레임을 우선 처리합니다. 지연은 서버 수신부터 분석·JPEG 생성까지의 시간입니다.</small></details>
           </div>
           <section class="card faces-panel">
             <h2>추적별 얼굴 분석</h2>
             <p>크기·선명도·밝기·자세를 검사합니다. 품질을 통과한 가장 좋은 얼굴만 유지합니다.</p>
             <div class="face-grid">
               @for (track of analysis()?.result?.tracks || []; track track.track_id) {
-                <article class="face-card" [class.face-ready]="track.face?.embedding_ready">
+                <article class="face-card" [class.face-ready]="track.face?.embedding_ready" [class.candidate-track]="track.face?.matches?.length">
                   @if (track.face?.embedding_ready) {<img [src]="faceUrl(track)" [alt]="'추적 ' + track.track_id + '의 정렬된 최적 얼굴'" width="112" height="112">} @else {<div class="face-empty">#{{ track.track_id }}</div>}
                   <div class="face-details"><strong>추적 #{{ track.track_id }}</strong><div class="face-status">{{ faceLabel(track.face) }}</div><small>현재 품질 {{ track.face?.quality ?? 0 | number:'1.2-2' }} / 1.00</small>
                     @if (track.face?.best; as best) {<small>최적 품질 {{ best.quality | number:'1.2-2' }} · 512차원</small>}
@@ -156,7 +173,10 @@
             <small class="face-note">품질 기준과 자세 추정은 시험용 설정입니다. 특징 준비는 인물 확인을 의미하지 않습니다.</small>
           </section>
         }
-        <app-event-panel [requestHeaders]="headers()" (sessionExpired)="clearSession()" />
+        @if (!selectedCamera()) {<section class="card live-empty"><h2>카메라를 선택하세요</h2><p>CCTV 목록에서 선택하면 영상과 추적별 얼굴 후보를 확인할 수 있습니다.</p></section>}
+        </div>
+        <app-event-panel [requestHeaders]="headers()" [selectedCameraId]="selectedCamera()?.camera_id ?? null" [references]="persons()" (sessionExpired)="clearSession()" />
+        </div>
       }
     </main>
   </div>

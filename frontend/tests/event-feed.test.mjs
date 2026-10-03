@@ -8,9 +8,43 @@ const source = readFileSync(new URL('../src/app/event-panel.component.ts', impor
 const compiled = ts.transpileModule(source, {compilerOptions:{target:ts.ScriptTarget.ES2022,
   module:ts.ModuleKind.ES2022, experimentalDecorators:true}}).outputText
   .replace(/from ['"]([^'"]+)['"]/g, (_, name) => `from '${import.meta.resolve(name)}'`);
-const {EventFeed} = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
+const {EventFeed, filterEvents, registeredFaceUrl} = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 const item = (event_id, change_id = event_id, status = 'candidate') => ({type:'person_match', event_id, change_id, status});
 const turn = () => new Promise(resolve => setImmediate(resolve));
+
+test('Live Search combines camera, normalized person name and review status without changing the recovery feed', () => {
+  const rows = [
+    {...item(3, 3, 'confirmed'), camera_id: 2, person_name: 'Target Alpha'},
+    {...item(2), camera_id: 1, person_name: 'Target Alpha'},
+    {...item(1, 1, 'confirmed'), camera_id: 1, person_name: 'Target Beta'}
+  ];
+  assert.deepEqual(filterEvents(rows, {camera:'selected', person:'  ALPHA ', status:'candidate'}, 1).map(row => row.event_id), [2]);
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].status, 'confirmed');
+  assert.deepEqual(filterEvents(rows, {camera:'all', person:'Alpha', status:'confirmed'}, 1).map(row => row.event_id), [3]);
+});
+
+test('Live Search shows authorized recent events before selecting a camera and does not reorder them', () => {
+  const rows = [{...item(2), camera_id:2, person_name:'가'}, {...item(1), camera_id:1, person_name:'나'}];
+  assert.deepEqual(filterEvents(rows, {camera:'selected', person:'', status:'all'}, null), rows);
+  assert.deepEqual(filterEvents(rows, {camera:'selected', person:'', status:'all'}, 3), []);
+});
+
+test('comparison uses the best currently available registered face and leaves source order intact', () => {
+  const faces = [
+    {id:4, quality:.95, state:'ready', image_available:false},
+    {id:3, quality:.99, state:'deleting', image_available:true},
+    {id:2, quality:.9, state:'ready', image_available:true},
+    {id:1, quality:.9, state:'ready', image_available:true}
+  ];
+  assert.equal(registeredFaceUrl({person_id:7}, [{id:7, faces}]), '/api/persons/7/faces/1/image');
+  assert.deepEqual(faces.map(face => face.id), [4,3,2,1]);
+});
+
+test('comparison has no registered image for inaccessible people or expired references', () => {
+  assert.equal(registeredFaceUrl({person_id:7}, []), null);
+  assert.equal(registeredFaceUrl({person_id:7}, [{id:7, faces:[{id:1, quality:.9, state:'expired', image_available:true}]}]), null);
+});
 
 function setup(read) {
   let rows = [], expired = 0;

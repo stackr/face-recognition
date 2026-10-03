@@ -92,7 +92,7 @@ test('검색 이벤트 화면, 확인·거부, WebSocket 중단 후 HTTP 복구�
     await expect(card).toContainText(personName);
     await expect(card).toContainText(cameraName);
     await expect(card.locator('.event-status')).toHaveText('확인 전 후보');
-    await expect.poll(() => card.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(112);
+    await expect.poll(() => card.locator('.event-detected-image').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(112);
     await expect(card.getByRole('link', {name: '검출 프레임'})).toHaveAttribute('href', `/api/events/${eventId}/frame`);
     expect((await request.get(facePath)).status()).toBe(401);
     expect((await page.request.post(`/api/cameras/${cameraId}/stop`, {headers})).status()).toBe(200);

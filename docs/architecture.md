@@ -1,6 +1,6 @@
 # Architecture
 
-비상업 시험용 프로젝트이며 Phase 6 구현·서비스 반영·실제 CUDA 파이프라인 및 전체 회귀 검증을 완료했다. native smoke 8개 항목을 통과했으며 detector는 cuda:0, face model은 cuda다. 권한 변경 후 전체 backend 91건, 실제 MariaDB 통합 1건, Chrome E2E 7건과 frontend 논리 테스트 12건을 통과했다. 실제 Alembic head는 `0005_match_events`로 확인했다.
+비상업 시험용 프로젝트이며 Phase 7 Angular Live Search UI를 구현하고 서비스에 반영했다. Phase 6의 실제 CUDA 파이프라인/이벤트 저장·복구를 유지하며 카메라·영상·이벤트 3열, 사진 비교와 표시 필터를 제공한다. 전체 backend 96건, 실제 MariaDB 통합 1건, Chrome E2E 8건과 frontend 논리 테스트 16건을 통과했다. 실제 Alembic head는 `0005_match_events`다. 자세한 범위는 [Phase 7 결과](phase7-report.md)를 따른다.
 
 ## 현재 구현
 
@@ -128,6 +128,14 @@ event_state 잠금 아래 ID를 발급하고 이벤트·변경 journal을 함께
 얼굴과 그 관측의 압축 frame을 data/events에 private JPEG로 보관한다. 한 tick의 frame JPEG는 여러 best face가 공유한다. image 7일/event 30일, 저장 한도 500 MB/50,000건, 저장 queue 32건이 기본이다. TTL/deleting/삭제 상태는 조회 즉시 차단하며 30초마다 최대 200건을 정리한다. commit 응답 유실은 파일을 보존하고 1시간 지난 orphan을 SQL 기준으로 정리한다.
 
 WebSocket은 정확한 allowed Origin과 로그인 cookie를 확인하며 전송/2초 heartbeat마다 새 transaction으로 계정/카메라·인물 grant를 검사한다. 연결당 queue 64개/전체 32개/send timeout 5초이며 초과는 1013으로 종료한다. Angular는 event_id별 가장 큰 change_id를 유지하고 HTTP next_cursor로 누락을 복구한다. 재접속·권한 변경·30초 snapshot 조회 및 logout의 늦은 응답을 구분한다. native 적용/측정 한계와 API 규칙은 [Phase 6 결과](phase6-report.md)에 기록했다.
+
+## Phase 7 Live Search 표시
+
+Angular는 카메라의 현재 `can_view`/`can_operate`와 이벤트의 `can_review`를 사용하여 목록과 조작을 제공한다. 서버는 기존 cookie/CSRF/카메라·인물 grant를 다시 검사한다. 선택 카메라는 hash URL에 저장하고 최신 목록에서 복원한다. 상태 요청은 카메라/페이지 세대를 확인하고 목록 요청은 로그인 세대를 확인하여 늦은 응답을 차단한다. 기본 갱신 간격은 상태 2초, 카메라/등록 얼굴 30초다.
+
+MJPEG의 bbox/track ID는 같은 분석 JPEG에 포함한다. 인물 grant로 걸러진 후보 이름/수는 중앙 얼굴 카드와 후보 수에 표시하고 MJPEG에 인물 이름을 추가하지 않는다. 오른쪽 현재 등록 얼굴은 ready/이미지 유효 reference 중 품질 우선 대표 사진이며 검출 당시 reference snapshot을 의미하지 않는다. 두 사진 모두 기존 인증 endpoint를 사용하고 실패 시 안내로 전환한다.
+
+카메라/인물 이름/상태 필터는 최대 100개 이벤트의 표시만 바꾼다. EventFeed의 map/buffer 및 HTTP cursor 복구를 필터와 분리하여 숨겨진 이벤트의 변경도 처리한다. 필터 없는 전체 보관 기록 검색과 클립 저장은 이번 UI에 추가하지 않았다.
 
 ## Phase 4 reference gallery 및 수명
 

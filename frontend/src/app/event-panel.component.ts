@@ -1,6 +1,7 @@
 import {CommonModule} from '@angular/common';
 import {HttpClient} from '@angular/common/http';
-import {Component, EventEmitter, Input, OnDestroy, OnInit, Output, inject, signal} from '@angular/core';
+import {Component, EventEmitter, Input, OnDestroy, OnInit, Output, computed, inject, signal} from '@angular/core';
+import {FormsModule} from '@angular/forms';
 import {firstValueFrom, timeout} from 'rxjs';
 
 export interface MatchEvent {
@@ -11,6 +12,24 @@ export interface MatchEvent {
   can_review: boolean;
 }
 export interface EventPage {items: MatchEvent[]; next_cursor: number; change_cursor?: number; has_more: boolean;}
+export interface ReferencePerson {
+  id: number; faces: {id: number; quality: number; state: string; image_available: boolean}[];
+}
+export interface EventFilters {camera: 'selected' | 'all'; person: string; status: string;}
+
+export function filterEvents(rows: MatchEvent[], filters: EventFilters, cameraId: number | null) {
+  const name = filters.person.trim().toLocaleLowerCase();
+  return rows.filter(event => (filters.camera === 'all' || cameraId === null || event.camera_id === cameraId)
+    && (!name || event.person_name.toLocaleLowerCase().includes(name))
+    && (filters.status === 'all' || event.status === filters.status));
+}
+
+export function registeredFaceUrl(event: MatchEvent, persons: ReferencePerson[]) {
+  const face = persons.find(person => person.id === event.person_id)?.faces
+    .filter(face => face.state === 'ready' && face.image_available)
+    .sort((a, b) => b.quality - a.quality || a.id - b.id)[0];
+  return face ? `/api/persons/${event.person_id}/faces/${face.id}/image` : null;
+}
 
 /** The recovery cursor advances only after ordered HTTP pages, never from a WS message. */
 export class EventFeed {
@@ -134,20 +153,33 @@ export class EventFeed {
 }
 
 @Component({
-  selector: 'app-event-panel', standalone: true, imports: [CommonModule],
+  selector: 'app-event-panel', standalone: true, imports: [CommonModule, FormsModule],
   template: `
     <section class="card events-panel">
-      <div class="preview-heading"><h2>검색 이벤트</h2><span class="text-secondary" role="status">{{ connection() }}</span></div>
-      <p>권한이 있는 카메라·인물의 최근 100건입니다. 후보를 확인하거나 거부할 수 있습니다.</p>
+      <div class="preview-heading"><h2>검색 이벤트</h2><span class="event-connection" [class.connected]="connection() === '연결됨'" role="status">{{ connection() }}</span></div>
+      <p class="event-intro">실시간 후보를 비교하고 검토하세요.</p>
+      <div class="event-filters">
+        <div><label for="event-camera">카메라 범위</label><select id="event-camera" class="form-select form-select-sm" [ngModel]="filters().camera" (ngModelChange)="setFilter('camera', $event)"><option value="selected">선택 카메라</option><option value="all">전체 카메라</option></select></div>
+        <div><label for="event-status">이벤트 상태</label><select id="event-status" class="form-select form-select-sm" [ngModel]="filters().status" (ngModelChange)="setFilter('status', $event)"><option value="all">전체 상태</option><option value="candidate">확인 전 후보</option><option value="confirmed">운영자 확인</option><option value="rejected">운영자 거부</option></select></div>
+        <div class="event-person-filter"><label for="event-person">인물 이름</label><input id="event-person" type="search" class="form-control form-control-sm" [ngModel]="filters().person" (ngModelChange)="setFilter('person', $event)" maxlength="120" placeholder="이름으로 검색"></div>
+      </div>
+      <div class="event-filter-summary"><span>최근 {{ events().length }}건 중 {{ visibleEvents().length }}건 표시</span><button type="button" class="btn btn-sm btn-link" (click)="resetFilters()">필터 초기화</button></div>
       @if (error()) {<div class="alert alert-warning" role="alert">{{ error() }}</div>}
       <div class="event-grid">
-        @for (event of events(); track event.event_id) {
-          <article class="event-card">
-            @if (event.thumbnail_url) {<img [src]="event.thumbnail_url + '?v=' + event.change_id" [alt]="event.person_name + ' 검색 후보 얼굴'" width="112" height="112">}
-            <div class="event-details"><strong>{{ event.person_name }}</strong><small>{{ event.camera_name }} · 추적 #{{ event.track_id }}</small>
-              <small>{{ event.timestamp | date:'yyyy-MM-dd HH:mm:ss' }}</small>
-              <small>유사도 {{ event.face_similarity | number:'1.3-3' }} · 얼굴 품질 {{ event.face_quality | number:'1.2-2' }}</small>
-              <span class="event-status">{{ statusLabel(event.status) }}</span>
+        @for (event of visibleEvents(); track event.event_id) {
+          <article class="event-card" [class.event-confirmed]="event.status === 'confirmed'" [class.event-rejected]="event.status === 'rejected'">
+            <div class="event-details"><div class="event-card-heading"><strong>{{ event.person_name }}</strong><span class="event-status">{{ statusLabel(event.status) }}</span></div>
+              <div class="event-photo-pair">
+                <figure><figcaption>현재 등록 얼굴</figcaption>
+                  @if (referenceUrl(event); as url) {<img class="event-reference-image" [src]="url" [alt]="event.person_name + '의 현재 등록 얼굴'" width="112" height="112" loading="lazy" (error)="imageFailed(url)">} @else {<div class="event-image-empty">등록 사진 없음</div>}
+                </figure>
+                <figure><figcaption>검출 얼굴</figcaption>
+                  @if (detectedUrl(event); as url) {<img class="event-detected-image" [src]="url" [alt]="event.person_name + ' 검색 후보 얼굴'" width="112" height="112" loading="lazy" (error)="imageFailed(url)">} @else {<div class="event-image-empty">사진 만료·삭제</div>}
+                </figure>
+              </div>
+              <small class="event-camera-name">{{ event.camera_name }} · 추적 #{{ event.track_id }}</small>
+              <time [attr.datetime]="event.timestamp">{{ event.timestamp | date:'yyyy-MM-dd HH:mm:ss' }}</time>
+              <div class="event-scores"><span>유사도 <strong>{{ event.face_similarity | number:'1.3-3' }}</strong></span><span>얼굴 품질 <strong>{{ event.face_quality | number:'1.2-2' }}</strong></span></div>
               <div class="event-actions">
                 @if (event.frame_url) {<a [href]="event.frame_url" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">검출 프레임</a>}
                 @if (event.can_review) {
@@ -157,16 +189,23 @@ export class EventFeed {
               </div>
             </div>
           </article>
-        } @empty {<div class="text-secondary">저장된 검색 후보가 없습니다. 분석 중 품질과 유사도 기준을 통과하면 표시됩니다.</div>}
+        } @empty {<div class="event-empty">{{ events().length ? '조건에 맞는 이벤트가 없습니다. 필터를 변경해 주세요.' : '저장된 검색 후보가 없습니다. 분석 중 품질과 유사도 기준을 통과하면 표시됩니다.' }}</div>}
       </div>
-      <small class="face-note">검색 후보는 동일인 확정이 아닙니다. 이벤트 사진은 기본 7일, 기록은 30일 보관합니다.</small>
+      <small class="face-note">권한이 있는 최근 100건 안에서 필터링합니다. 등록 얼굴은 현재 사진이며 검출 당시의 등록 사진과 다를 수 있습니다. 검색 후보는 동일인 확정이 아닙니다.</small>
     </section>`
 })
 export class EventPanelComponent implements OnInit, OnDestroy {
   @Input() requestHeaders: Record<string, string> = {};
+  @Input() set selectedCameraId(value: number | null) {this.cameraId.set(value);}
+  @Input() set references(value: ReferencePerson[]) {this.persons.set(value);}
   @Output() sessionExpired = new EventEmitter<void>();
   private http = inject(HttpClient);
   events = signal<MatchEvent[]>([]);
+  private cameraId = signal<number | null>(null);
+  private persons = signal<ReferencePerson[]>([]);
+  private failedImages = signal(new Set<string>());
+  filters = signal<EventFilters>({camera: 'selected', person: '', status: 'all'});
+  visibleEvents = computed(() => filterEvents(this.events(), this.filters(), this.cameraId()));
   connection = signal('연결 중');
   error = signal('');
   reviewing = signal(false);
@@ -174,6 +213,17 @@ export class EventPanelComponent implements OnInit, OnDestroy {
     rows => this.events.set(rows), label => this.connection.set(label), () => this.sessionExpired.emit());
   ngOnInit() {this.feed.start();}
   ngOnDestroy() {this.feed.stop();}
+  setFilter(key: keyof EventFilters, value: string) {this.filters.update(filters => ({...filters, [key]: value}));}
+  resetFilters() {this.filters.set({camera: 'selected', person: '', status: 'all'});}
+  imageFailed(url: string) {this.failedImages.update(values => new Set([...values, url].slice(-256)));}
+  referenceUrl(event: MatchEvent) {
+    const url = registeredFaceUrl(event, this.persons());
+    return url && !this.failedImages().has(url) ? url : null;
+  }
+  detectedUrl(event: MatchEvent) {
+    const url = event.thumbnail_url ? `${event.thumbnail_url}?v=${event.change_id}` : null;
+    return url && !this.failedImages().has(url) ? url : null;
+  }
   statusLabel(status: string) {return ({candidate:'확인 전 후보', confirmed:'운영자 확인', rejected:'운영자 거부'} as Record<string, string>)[status] || status;}
   review(event: MatchEvent, action: 'confirm' | 'reject') {
     if (this.reviewing()) return;

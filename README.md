@@ -1,6 +1,6 @@
 # CCTV Search
 
-비상업 시험용 CCTV 얼굴 검색 프로젝트. **Phase 6 구현·서비스 반영·실제 CUDA 파이프라인 및 전체 회귀 검증을 완료했다.** backend 91건, 실제 MariaDB 통합 1건, Chrome E2E 7건과 frontend 논리 테스트 12건을 통과했다. DB migration head는 `0005_match_events`다. Ubuntu native 서비스와 Python venv를 사용한다.
+비상업 시험용 CCTV 얼굴 검색 프로젝트. **Phase 7 Angular Live Search UI를 구현하고 서비스에 반영했다.** CCTV 목록·영상/추적·실시간 이벤트를 3열로 표시하며 등록/검출 얼굴 비교, 필터, 확인·거부와 재연결 복구를 제공한다. backend 96건, 실제 MariaDB 통합 1건, Chrome E2E 8건과 frontend 논리 테스트 16건을 통과했다. DB migration head는 `0005_match_events`다. Ubuntu native 서비스와 Python venv를 사용한다.
 
 로그인/카메라 관리에 더해 MP4 및 기본 RTSP 입력, YOLO11n 사람 탐지, ByteTrack 추적, 인증된 MJPEG 미리보기, 카메라별 영상 접근 권한, 별도 GPU worker와 1채널 benchmark를 사용할 수 있다. SCRFD 얼굴 탐지, 5-point alignment, 품질/자세 평가와 L2 정규화된 512차원 ArcFace 특징을 생성한다. 인물·다중 얼굴 등록, Memory/Qdrant cosine 검색, 인증된 등록 이미지와 인물별 권한, 삭제 재시도 및 이미지·특징별 보관 기간 정리를 제공한다. 전체 요구 사항은 [PLAN.md](PLAN.md), 구현 구성과 후속 설계는 [architecture.md](docs/architecture.md)를 참고한다.
 
@@ -325,7 +325,7 @@ Phase 6 구현과 전체 backend 회귀 91건, frontend 논리 테스트 12건, 
 
 `GET /api/events?after_id=...`는 신규 기록, `?after_change_id=...`는 기존 이벤트의 변경도 복구한다. limit은 최대 100이며 next_cursor/has_more로 페이지를 진행한다. `/ws/events`는 cookie/Origin/권한과 제한 queue를 검사한다. nginx의 8080 origin을 사용할 경우 실제 브라우저 주소를 `ALLOWED_ORIGINS`에 추가해야 한다. API는 한 프로세스로 실행하며 migration이 없거나 DB 초기 연결이 실패하면 Phase 6 API startup을 중단한다.
 
-API 규칙, 검증 범위 및 전체 회귀/native 적용 명령은 [phase6-report.md](docs/phase6-report.md)에 기록했다. 전체 Live Search 배치·필터 UI는 Phase 7 범위다.
+API 규칙, 검증 범위 및 전체 회귀/native 적용 명령은 [phase6-report.md](docs/phase6-report.md)에 기록했다. 전체 Live Search 배치·필터 UI는 아래 Phase 7에서 제공한다.
 
 2026-10-03 권한 변경 후 에이전트에서 전체 회귀와 실제 브라우저 검증을 완료했다. 얼굴 크롭의 실제 전송 JPEG 크기, 등록·수정·취소, RTSP 중단/복구, 이벤트 확인·거부와 WebSocket 중단 후 HTTP cursor 복구, 새로고침·모바일 표시·로그아웃을 확인했다. 기존 카메라·인물·얼굴·계정 및 카메라 실행 상태를 보존했고 자신이 만든 임시 자료를 정리했다. 결과는 `data/reports/phase6-regression.json`에 기록했으며 다음 명령으로 반복할 수 있다.
 
@@ -334,6 +334,14 @@ CCTV_RUN_INTEGRATION=1 .venv/bin/python -m pytest -m integration -q
 .venv/bin/python -m pytest -m 'not integration' -q
 npm --prefix frontend run test:e2e
 ```
+
+## Live Search · Phase 7
+
+왼쪽 메뉴의 **Live Search**를 열고 CCTV 목록에서 카메라를 선택한다. 왼쪽에서 이름/위치로 카메라를 찾고, 중앙에서 분석 시작·중지와 사람 박스/추적 번호·얼굴 후보를 확인하며, 오른쪽에서 실시간 검색 이벤트를 검토한다. 큰 화면은 3열이고 작은 화면에서는 순서대로 표시한다. 카메라 선택은 `#/live/{camera_id}`에 저장하여 새로고침·뒤로 가기에서도 복원한다. 선택만으로 분석을 시작하거나 다른 카메라 분석을 중지하지 않는다.
+
+이벤트는 **현재 등록 얼굴**과 **검출 얼굴**을 함께 표시한다. 등록 사진은 현재 조회 가능한 대표 얼굴이므로 검출 당시 사진과 다를 수 있다. 카메라 범위, 인물 이름과 확인/거부 상태로 권한 있는 최근 100건을 필터링한다. 필터와 관계없이 WebSocket/HTTP 변경 복구를 유지한다. 사진이 만료·삭제되거나 접근 권한이 바뀌면 사진 대신 안내를 표시한다.
+
+카메라 조회/조작 grant에 맞춰 목록과 버튼을 제공하고 기존 서버 인증·CSRF 검사를 유지한다. 인물 관리 메뉴는 마지막에 유지하며 기존 등록·크롭·시험 비교 화면을 그대로 사용한다. Phase 7 구현·검증 범위와 실행 결과는 [phase7-report.md](docs/phase7-report.md)에 기록한다. 다음 개발 범위는 Phase 8 이벤트 전후 영상 클립이다.
 
 ## Troubleshooting
 

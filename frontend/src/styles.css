@@ -64,3 +64,89 @@ body { margin: 0; background: #f4f6fa; color: var(--ink); font-family: -apple-sy
 .event-actions {display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .3rem;}
 .event-status {color: #74600d; font-size: .85rem;}
 @media (max-width: 480px) {.event-card {flex-direction: column;}}
+
+.live-workspace {max-width: none; padding: 28px;}
+.live-search-layout {display: grid; grid-template-columns: 190px minmax(340px, 1fr) 340px; gap: 18px; align-items: start;}
+.live-camera-list, .live-main, app-event-panel {min-width: 0;}
+.live-camera-list {padding: 18px 14px; position: sticky; top: 20px;}
+.live-camera-heading h2 {font-size: 18px; font-weight: 650; margin: 8px 0 18px;}
+.live-camera-total {display: block; color: var(--muted); font-size: 11px; margin: 12px 0;}
+.live-camera-items {display: grid; gap: 8px; max-height: 65vh; overflow-y: auto;}
+.live-camera-item {text-align: left; border: 1px solid #e3e8f1; background: #fff; border-radius: 8px; padding: 12px; min-width: 0; color: var(--ink); overflow-wrap: anywhere;}
+.live-camera-item:hover {background: #f6f8ff;}
+.live-camera-item.selected {border-color: var(--accent); background: #eef2ff; box-shadow: inset 3px 0 var(--accent);}
+.live-camera-item:focus-visible {outline: 2px solid var(--accent); outline-offset: 2px;}
+.live-camera-item strong {display: block; font-size: 13px;}
+.live-camera-item small {display: block; font-size: 11px; color: var(--muted); margin-top: 5px;}
+.live-camera-meta {display: flex; justify-content: space-between; gap: 8px; font-size: 10px; margin-top: 10px; color: #526683;}
+.live-camera-empty {font-size: 12px; color: var(--muted); padding: 18px 0; margin: 0;}
+.live-main .analysis-controls {padding: 20px; margin-bottom: 18px;}
+.live-main .analysis-actions {gap: 10px; margin-top: 14px;}
+.live-main .analysis-actions .btn {font-size: 13px;}
+.live-main .live-grid {grid-template-columns: minmax(0, 1fr); gap: 18px;}
+.live-main .preview-heading {padding: 18px; gap: 12px;}
+.live-main .preview-heading h2 {overflow-wrap: anywhere;}
+.live-main .preview-screen {min-height: 240px;}
+.live-legend {display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 0 18px 12px; font-size: 11px; color: var(--muted);}
+.candidate-count {color: #936015; background: #fff5dc; border-radius: 5px; padding: 2px 7px;}
+.live-main .faces-panel {padding: 18px; margin-top: 18px;}
+.live-main .face-grid {grid-template-columns: minmax(0, 1fr);}
+.face-details {min-width: 0; overflow-wrap: anywhere;}
+.candidate-track {border-color: #d8b465; background: #fffdf6;}
+.candidate-label {color: #956318; font-size: 12px; margin-top: 8px;}
+.live-main .metrics-card {padding: 18px;}
+.metrics-card summary {font-size: 13px; font-weight: 600; cursor: pointer;}
+.metrics-card[open] summary {margin-bottom: 18px;}
+.live-empty {padding: 40px 24px; text-align: center; color: var(--muted);}
+.live-empty h2 {font-size: 18px; color: var(--ink);}
+.live-empty p {font-size: 13px; margin-bottom: 0;}
+.events-panel {margin-top: 0; padding: 18px;}
+.events-panel .preview-heading {padding: 0; gap: 10px; align-items: flex-start;}
+.event-connection {font-size: 11px; color: #a37426; white-space: nowrap; padding-top: 3px;}
+.event-connection.connected {color: #227c65;}
+.event-intro {font-size: 12px; color: var(--muted); margin: 10px 0 16px;}
+.event-filters {display: grid; grid-template-columns: 1fr 1fr; gap: 10px;}
+.event-filters label {font-size: 11px; color: var(--muted); min-width: 0;}
+.event-filters .form-select, .event-filters .form-control {margin-top: 5px; font-size: 12px;}
+.event-person-filter {grid-column: 1 / -1;}
+.event-filter-summary {display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 11px; color: var(--muted); margin: 10px 0;}
+.event-filter-summary .btn {font-size: 11px; padding: 4px 0; text-decoration: none;}
+.event-grid {grid-template-columns: minmax(0, 1fr); gap: 12px; max-height: 78vh; overflow-y: auto;}
+.event-card {display: block; padding: 14px; border-radius: 9px; background: #fffdf8; border-color: #e7ddc4;}
+.event-card.event-confirmed {background: #f8fcfa; border-color: #c6dfd3;}
+.event-card.event-rejected {background: #fbfbfd; border-color: #dce3eb;}
+.event-card-heading {display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;}
+.event-card-heading > strong {font-size: 13px;}
+.event-status {font-size: 10px; white-space: nowrap; border-radius: 4px; padding: 3px 5px; background: #fff2cf; color: #936015;}
+.event-confirmed .event-status {background: #e5f4ed; color: #227c65;}
+.event-rejected .event-status {background: #eef0f5; color: #65738a;}
+.event-photo-pair {display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 8px 0;}
+.event-photo-pair figure {margin: 0; min-width: 0;}
+.event-photo-pair figcaption {font-size: 10px; color: var(--muted); margin-bottom: 6px;}
+.event-photo-pair img, .event-image-empty {width: 100%; max-width: 112px; height: auto; aspect-ratio: 1; border-radius: 6px; object-fit: cover;}
+.event-image-empty {display: grid; place-items: center; text-align: center; padding: 8px; font-size: 11px; background: #edf1f6; color: #76859b;}
+.event-details time {font-size: 11px; color: var(--muted);}
+.event-scores {display: flex; flex-wrap: wrap; gap: 14px; font-size: 11px; color: var(--muted); margin: 5px 0;}
+.event-scores strong {color: var(--ink); font-size: 13px; margin-left: 4px;}
+.event-actions .btn {font-size: 11px;}
+.event-empty {font-size: 12px; color: var(--muted); text-align: center; line-height: 1.8; padding: 30px 10px; background: #f8f9fc; border-radius: 8px;}
+.events-panel > .face-note {display: block; margin-top: 16px; line-height: 1.8;}
+@media (max-width: 1200px) {
+  .live-search-layout {grid-template-columns: minmax(0, 1fr) 310px;}
+  .live-camera-list {grid-column: 1 / -1; position: static;}
+  .live-camera-heading h2 {margin-bottom: 12px;}
+  .live-camera-items {display: flex; overflow-x: auto; max-height: none; padding-bottom: 4px;}
+  .live-camera-item {flex: 0 0 180px;}
+}
+@media (max-width: 1100px) {
+  .live-search-layout {grid-template-columns: minmax(0, 1fr);}
+  .event-grid {max-height: none; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));}
+}
+@media (max-width: 600px) {
+  .live-workspace {padding: 24px 16px;}
+  .live-main .preview-screen {min-height: 200px;}
+  .live-main .metrics-card dl {grid-template-columns: 1fr auto;}
+  .live-main .analysis-controls {padding: 16px;}
+  .live-main .preview-heading {flex-wrap: wrap;}
+  .event-card-heading {flex-wrap: wrap;}
+}

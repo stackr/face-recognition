@@ -8,15 +8,16 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import admin_user, current_user
 from app.core.security import encrypt_rtsp, redact_rtsp
 from app.db.session import get_db
-from app.models import AuditLog, Camera, User
+from app.models import AuditLog, Camera, CameraPermission, User
 from app.schemas.foundation import CameraInput, CameraOutput
 from app.services.camera_operations import camera_mutation
 
 router = APIRouter(prefix="/api/cameras", tags=["Cameras"])
 
 
-def output(camera: Camera, request: Request) -> CameraOutput:
+def output(camera: Camera, request: Request, db: Session, user: User) -> CameraOutput:
     key = request.app.state.settings.rtsp_encryption_key.get_secret_value()
+    grant = db.get(CameraPermission, (camera.id, user.id)) if user.role != "admin" else None
     return CameraOutput(
         camera_id=camera.id,
         name=camera.name,
@@ -28,6 +29,9 @@ def output(camera: Camera, request: Request) -> CameraOutput:
         has_test_video=bool(camera.video_path),
         location=camera.location,
         enabled=camera.enabled,
+        can_view=user.role == "admin" or grant is not None,
+        can_operate=user.role == "admin"
+        or (user.role == "operator" and grant is not None and grant.can_operate),
         created_at=camera.created_at.replace(tzinfo=UTC),
         updated_at=camera.updated_at.replace(tzinfo=UTC),
     )
@@ -59,7 +63,7 @@ def list_cameras(
     if offset < 0 or not 1 <= limit <= 200:
         raise HTTPException(422, "Invalid pagination")
     rows = db.scalars(select(Camera).order_by(Camera.id).offset(offset).limit(limit)).all()
-    return [output(camera, request) for camera in rows]
+    return [output(camera, request, db, user) for camera in rows]
 
 
 @router.get("/{camera_id}", response_model=CameraOutput)
@@ -69,7 +73,7 @@ def get_camera(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
-    return output(find_camera(camera_id, db), request)
+    return output(find_camera(camera_id, db), request, db, user)
 
 
 @router.post("", response_model=CameraOutput, status_code=201)
@@ -104,7 +108,7 @@ def create_camera(
     )
     save(db)
     db.refresh(camera)
-    return output(camera, request)
+    return output(camera, request, db, user)
 
 
 @router.put("/{camera_id}", response_model=CameraOutput, dependencies=[Depends(camera_mutation)])
@@ -134,7 +138,7 @@ def update_camera(
     )
     save(db)
     db.refresh(camera)
-    return output(camera, request)
+    return output(camera, request, db, user)
 
 
 @router.delete("/{camera_id}", status_code=204, dependencies=[Depends(camera_mutation)])
