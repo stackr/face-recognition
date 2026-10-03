@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     face_max_roll: float = Field(default=35, ge=5, le=80)
     video_dir: Path = ROOT / "data/videos"
     detection_fps: float = Field(default=5, ge=1, le=15)
+    capture_decode_threads: int = Field(default=2, ge=1, le=8)
+    opencv_threads: int = Field(default=2, ge=1, le=8)
+    detector_batch_size: int = Field(default=4, ge=1, le=4)
+    detector_batch_face_budget_ms: float = Field(default=100, ge=10, le=1000)
+    yolo_fp16: bool = False
     detection_confidence: float = Field(default=0.1, ge=0, le=1)
     track_low_threshold: float = Field(default=0.1, ge=0, le=1)
     track_high_threshold: float = Field(default=0.5, ge=0, le=1)

@@ -374,7 +374,8 @@ class TrackFaces:
             return best["jpeg"] if best and best["stream_session_id"] == session else None
 
     def match(self, gallery, tracks):
-        key, _ = gallery.snapshot()
+        snapshot = gallery.snapshot()
+        key, _ = snapshot
         with self.lock:
             for track in tracks:
                 state = self.tracks.get(track["track_id"])
@@ -391,8 +392,16 @@ class TrackFaces:
                     scored = []
                     for sample in samples:
                         if sample.get("search_key") != key:
-                            sample["search"] = gallery.search(
-                                sample["embedding"], limit=self.settings.max_target_persons
+                            sample["search"] = (
+                                gallery.search_snapshot(
+                                    sample["embedding"],
+                                    snapshot,
+                                    limit=self.settings.max_target_persons,
+                                )
+                                if hasattr(gallery, "search_snapshot")
+                                else gallery.search(
+                                    sample["embedding"], limit=self.settings.max_target_persons
+                                )
                             )
                             sample["search_key"] = key
                         scored.append(sample["search"])

@@ -82,27 +82,39 @@ class ReferenceGallery:
             return self.key, list(self.references)
 
     def search(self, vector, *, allowed_person_ids=None, provider=None, limit=10):
-        with self.lock:
-            key, references = self.snapshot()
-            if allowed_person_ids is not None:
-                allowed = set(allowed_person_ids)
-                references = [ref for ref in references if ref.person_id in allowed]
-            chosen = provider or self.settings.face_search_provider
-            if chosen == "auto":
-                chosen = (
-                    "memory"
-                    if len(references) <= self.settings.face_memory_max_references
-                    else "qdrant"
-                )
-            matches = (self.memory if chosen == "memory" else self.qdrant).search(
-                vector, references, limit
+        return self.search_snapshot(
+            vector,
+            self.snapshot(),
+            allowed_person_ids=allowed_person_ids,
+            provider=provider,
+            limit=limit,
+        )
+
+    def search_snapshot(
+        self, vector, snapshot, *, allowed_person_ids=None, provider=None, limit=10
+    ):
+        # Reuse one authoritative SQL snapshot for all samples in this frame.
+        # No time-based cache: the next processed frame rechecks SQL eligibility.
+        key, references = snapshot
+        if allowed_person_ids is not None:
+            allowed = set(allowed_person_ids)
+            references = [ref for ref in references if ref.person_id in allowed]
+        chosen = provider or self.settings.face_search_provider
+        if chosen == "auto":
+            chosen = (
+                "memory"
+                if len(references) <= self.settings.face_memory_max_references
+                else "qdrant"
             )
-            return {
-                "gallery_revision": key[0],
-                "provider": chosen,
-                "matches": matches,
-                "threshold": self.settings.face_match_threshold,
-            }
+        matches = (self.memory if chosen == "memory" else self.qdrant).search(
+            vector, references, limit
+        )
+        return {
+            "gallery_revision": key[0],
+            "provider": chosen,
+            "matches": matches,
+            "threshold": self.settings.face_match_threshold,
+        }
 
     def reload(self, revision):
         with self.lock:

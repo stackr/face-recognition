@@ -38,6 +38,7 @@ def create_worker(
 
     @asynccontextmanager
     async def lifespan(app):
+        cv2.setNumThreads(settings.opencv_threads)
         from app.worker.detector import YoloPersonDetector
 
         try:
@@ -127,6 +128,7 @@ def create_worker(
             if runtime.diagnostics
             else {"status": "disabled"},
             "sampling": runtime.sampling_status(),
+            "scheduler": runtime.scheduler_status(),
             "clips": runtime.clips.status() if runtime.clips else {"status": "disabled"},
         }
 

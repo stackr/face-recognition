@@ -60,6 +60,8 @@ class CameraRun:
         self.detection_ms = deque(maxlen=600)
         self.face_counts = Counter()
         self.face_ms = deque(maxlen=600)
+        self.face_process_ms = deque(maxlen=600)
+        self.face_search_ms = deque(maxlen=600)
         self.max_people = 0
         self.thread = threading.Thread(
             target=self.capture, daemon=True, name=f"capture-{camera_id}"
@@ -144,6 +146,8 @@ class CameraRun:
                     self.source,
                     cv2.CAP_FFMPEG,
                     [
+                        cv2.CAP_PROP_N_THREADS,
+                        self.settings.capture_decode_threads,
                         cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
                         round(self.settings.rtsp_open_timeout_seconds * 1000),
                         cv2.CAP_PROP_READ_TIMEOUT_MSEC,
@@ -196,7 +200,11 @@ class CameraRun:
     def capture_mp4(self):
         cap = None
         try:
-            cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
+            cap = cv2.VideoCapture(
+                self.source,
+                cv2.CAP_FFMPEG,
+                [cv2.CAP_PROP_N_THREADS, self.settings.capture_decode_threads],
+            )
             if self.cancel.is_set():
                 return
             if not cap.isOpened():
@@ -293,6 +301,12 @@ class CameraRun:
                 "face_counts": dict(self.face_counts),
                 "face_cache_tracks": self.faces.size() if self.faces else 0,
                 "face_mean_ms": round(float(np.mean(self.face_ms)), 2) if self.face_ms else None,
+                "face_process_mean_ms": round(float(np.mean(self.face_process_ms)), 2)
+                if self.face_process_ms
+                else None,
+                "face_search_mean_ms": round(float(np.mean(self.face_search_ms)), 2)
+                if self.face_search_ms
+                else None,
                 "max_people": self.max_people,
                 "latency_mean_ms": round(float(np.mean(self.latencies)), 2)
                 if self.latencies
@@ -303,6 +317,13 @@ class CameraRun:
                 "detection_mean_ms": round(float(np.mean(self.detection_ms)), 2)
                 if self.detection_ms
                 else None,
+                "detection_p95_ms": round(float(np.percentile(self.detection_ms, 95)), 2)
+                if self.detection_ms
+                else None,
+                "face_p95_ms": round(float(np.percentile(self.face_ms, 95)), 2)
+                if self.face_ms
+                else None,
+                "embedding_fps": round(self.face_counts["embeddings_created"] / elapsed, 2),
                 "latency_samples": len(self.latencies),
                 "result": self.result,
             }
@@ -320,6 +341,9 @@ class WorkerRuntime:
         self.clips = None
         self.sampling_revision = sampling_revision
         self.pending_sampling = None
+        self.batch_counts = Counter()
+        self.batch_ms = deque(maxlen=600)
+        self.rotation = 0
         self.commands = Queue(maxsize=2)
         self.lock = threading.RLock()
         self.runs = OrderedDict()
@@ -442,140 +466,197 @@ class WorkerRuntime:
                         future.set_exception(exc)
             with self.lock:
                 runs = list(self.runs.values())
-            for run in runs:
-                if run.cancel.is_set():
+            if runs:
+                offset = self.rotation % len(runs)
+                runs = runs[offset:] + runs[:offset]
+                self.rotation += 1
+            face_cost = max(
+                (float(np.mean(r.face_ms)) for r in runs if getattr(r, "face_ms", None)), default=0
+            )
+            limit = self.settings.detector_batch_size
+            if face_cost > 0:
+                limit = min(
+                    limit, max(1, int(self.settings.detector_batch_face_budget_ms / face_cost))
+                )
+            for offset in range(0, len(runs), limit):
+                batch = []
+                # Select the latest image immediately before its batch, including
+                # after earlier face work. This bounds avoidable capture staleness.
+                for run in runs[offset : offset + limit]:
+                    if run.cancel.is_set():
+                        continue
+                    with run.lock:
+                        if run.state == "draining" and run.latest is None:
+                            run.state = "ended"
+                            run.ended_mono = time.monotonic()
+                            run.jpeg = run.result = run.tracker = run.faces = None
+                            continue
+                        if run.latest is None or time.monotonic() < run.next_due:
+                            continue
+                        frame, run.latest = run.latest, None
+                        run.next_due = time.monotonic() + 1 / self.settings.detection_fps
+                    batch.append((run, frame))
+                if not batch:
                     continue
-                with run.lock:
-                    if run.state == "draining" and run.latest is None:
-                        run.state = "ended"
-                        run.ended_mono = time.monotonic()
-                        run.jpeg = run.result = run.tracker = run.faces = None
-                        continue
-                    if run.latest is None or time.monotonic() < run.next_due:
-                        continue
-                    frame, run.latest = run.latest, None
-                    run.next_due = time.monotonic() + 1 / self.settings.detection_fps
                 try:
                     start = time.monotonic()
-                    boxes = self.detector.detect(frame.image)
-                    detection_ms = (time.monotonic() - start) * 1000
-                    with run.lock:
-                        if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
-                            continue
-                        if run.tracker is None:
-                            run.tracker = CameraTracker(self.settings)
-                        tracks = run.tracker.update(boxes, frame.image, frame.captured_mono)
-                        if run.faces is None:
-                            run.faces = TrackFaces(self.settings)
-                        faces = run.faces
-                        live_ids = run.tracker.live_ids()
-                    face_start = time.monotonic()
-                    face_counts = Counter()
-                    if self.face_analyzer is not None:
-                        face_counts = faces.process(self.face_analyzer, frame, tracks, live_ids)
-                    gallery_revision = None
-                    search_status = "disabled"
-                    if self.gallery is not None:
-                        try:
-                            gallery_revision = faces.match(self.gallery, tracks)
-                            search_status = "ready"
-                        except Exception as exc:
-                            # Reference-store outages must not stop camera analysis.
-                            search_status = "unavailable"
-                            logging.getLogger("cctv.worker").warning(
-                                "Reference search failed; type=%s", type(exc).__name__
-                            )
-                    face_ms = (time.monotonic() - face_start) * 1000
-                    annotated = frame.image.copy()
-                    for track in tracks:
-                        x1, y1, x2, y2 = map(int, track["bbox"])
-                        cv2.rectangle(annotated, (x1, y1), (x2, y2), (80, 230, 120), 2)
-                        cv2.putText(
-                            annotated,
-                            f"person #{track['track_id']} {track['confidence']:.2f}",
-                            (max(0, x1), max(20, y1 - 8)),
-                            cv2.FONT_HERSHEY_SIMPLEX,
-                            0.6,
-                            (80, 230, 120),
-                            2,
-                        )
-                        face = track.get("face", {})
-                        if face.get("bbox") and face.get("frame_id") == frame.frame_id:
-                            fx1, fy1, fx2, fy2 = map(int, face["bbox"])
-                            color = (
-                                (100, 220, 255) if face["status"] == "accepted" else (100, 130, 220)
-                            )
-                            cv2.rectangle(annotated, (fx1, fy1), (fx2, fy2), color, 2)
-                            for px, py in face.get("landmarks", []):
-                                cv2.circle(annotated, (round(px), round(py)), 2, color, -1)
-                    label = f"cam {run.camera_id} | {frame.stream_session_id[:8]} | frame {frame.frame_id} | {frame.captured_at}"
-                    cv2.putText(
-                        annotated,
-                        label,
-                        (12, 24),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        0.45,
-                        (255, 255, 255),
-                        1,
+                    images = [frame.image for _, frame in batch]
+                    boxes = (
+                        self.detector.detect_batch(images)
+                        if hasattr(self.detector, "detect_batch")
+                        else [self.detector.detect(image) for image in images]
                     )
-                    if annotated.shape[1] > 1280:
-                        annotated = cv2.resize(
-                            annotated, (1280, round(annotated.shape[0] * 1280 / annotated.shape[1]))
-                        )
-                    ok, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                    if not ok:
-                        raise RuntimeError("JPEG encoding failed")
-                    with run.lock:
-                        # Stop/EOF/loop can happen during inference; never publish stale faces.
-                        if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
-                            continue
-                        run.jpeg = encoded.tobytes()
-                        if self.events is not None and search_status == "ready":
-                            self.events.submit_tracks(
-                                run.camera_id,
-                                frame.stream_session_id,
-                                faces,
-                                tracks,
-                                gallery_revision,
-                                time.monotonic(),
-                            )
-                        if self.diagnostics is not None:
-                            self.diagnostics.submit_tracks(
-                                run.camera_id,
-                                frame.stream_session_id,
-                                frame,
-                                tracks,
-                                self.sampling_revision,
-                                search_status,
-                            )
-                        run.result = {
-                            "stream_session_id": frame.stream_session_id,
-                            "frame_id": frame.frame_id,
-                            "captured_at": frame.captured_at,
-                            "tracks": tracks,
-                            "gallery_revision": gallery_revision,
-                            "search_status": search_status,
-                        }
-                        run.processed += 1
-                        run.session_processed += 1
-                        run.face_counts.update(face_counts)
-                        if face_counts["analysis_frames"]:
-                            run.face_ms.append(face_ms)
-                        run.max_people = max(run.max_people, len(tracks))
-                        run.detection_ms.append(detection_ms)
-                        run.latencies.append((time.monotonic() - frame.captured_mono) * 1000)
-                        if run.state != "draining":
-                            run.state = "running"
-                            run.error_code = None
-                except Exception as exc:
-                    with run.lock:
-                        if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
-                            continue
-                        logging.getLogger("cctv.worker").error(
-                            "Camera %s inference failed; type=%s", run.camera_id, type(exc).__name__
-                        )
-                        run.fail("inference_failed")
+                    detection_ms = (time.monotonic() - start) * 1000 / len(batch)
+                    if len(boxes) != len(batch):
+                        raise RuntimeError("Detector batch result count mismatch")
+                    self.batch_counts[len(batch)] += 1
+                    self.batch_ms.append(detection_ms * len(batch))
+                except Exception:
+                    for run, frame in batch:
+                        with run.lock:
+                            if (
+                                not run.cancel.is_set()
+                                and frame.stream_session_id == run.stream_session_id
+                            ):
+                                run.fail("inference_failed")
+                    continue
+                for (run, frame), frame_boxes in zip(batch, boxes, strict=True):
+                    self.process_frame(run, frame, frame_boxes, detection_ms)
             self.cancel.wait(0.005)
+
+    def scheduler_status(self):
+        return {
+            "max_batch_size": self.settings.detector_batch_size,
+            "opencv_threads": self.settings.opencv_threads,
+            "capture_decode_threads": self.settings.capture_decode_threads,
+            "face_budget_ms": self.settings.detector_batch_face_budget_ms,
+            "batches_by_size": dict(self.batch_counts),
+            "batch_mean_ms": round(float(np.mean(self.batch_ms)), 2) if self.batch_ms else None,
+            "detection_timing": "batch inference including transfers/NMS divided by batch size",
+            "policy": "rotating ready cameras; latest frame only; no batching wait; shrink batches for costly face analysis",
+        }
+
+    def process_frame(self, run, frame, boxes, detection_ms):
+        try:
+            with run.lock:
+                if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
+                    return
+                if run.tracker is None:
+                    run.tracker = CameraTracker(self.settings)
+                tracks = run.tracker.update(boxes, frame.image, frame.captured_mono)
+                if run.faces is None:
+                    run.faces = TrackFaces(self.settings)
+                faces = run.faces
+                live_ids = run.tracker.live_ids()
+            face_start = time.monotonic()
+            face_counts = Counter()
+            if self.face_analyzer is not None:
+                face_counts = faces.process(self.face_analyzer, frame, tracks, live_ids)
+            face_process_ms = (time.monotonic() - face_start) * 1000
+            search_start = time.monotonic()
+            gallery_revision = None
+            search_status = "disabled"
+            if self.gallery is not None:
+                try:
+                    gallery_revision = faces.match(self.gallery, tracks)
+                    search_status = "ready"
+                except Exception as exc:
+                    # Reference-store outages must not stop camera analysis.
+                    search_status = "unavailable"
+                    logging.getLogger("cctv.worker").warning(
+                        "Reference search failed; type=%s", type(exc).__name__
+                    )
+            face_search_ms = (time.monotonic() - search_start) * 1000
+            face_ms = (time.monotonic() - face_start) * 1000
+            annotated = frame.image.copy()
+            for track in tracks:
+                x1, y1, x2, y2 = map(int, track["bbox"])
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (80, 230, 120), 2)
+                cv2.putText(
+                    annotated,
+                    f"person #{track['track_id']} {track['confidence']:.2f}",
+                    (max(0, x1), max(20, y1 - 8)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (80, 230, 120),
+                    2,
+                )
+                face = track.get("face", {})
+                if face.get("bbox") and face.get("frame_id") == frame.frame_id:
+                    fx1, fy1, fx2, fy2 = map(int, face["bbox"])
+                    color = (100, 220, 255) if face["status"] == "accepted" else (100, 130, 220)
+                    cv2.rectangle(annotated, (fx1, fy1), (fx2, fy2), color, 2)
+                    for px, py in face.get("landmarks", []):
+                        cv2.circle(annotated, (round(px), round(py)), 2, color, -1)
+            label = f"cam {run.camera_id} | {frame.stream_session_id[:8]} | frame {frame.frame_id} | {frame.captured_at}"
+            cv2.putText(
+                annotated,
+                label,
+                (12, 24),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.45,
+                (255, 255, 255),
+                1,
+            )
+            if annotated.shape[1] > 1280:
+                annotated = cv2.resize(
+                    annotated, (1280, round(annotated.shape[0] * 1280 / annotated.shape[1]))
+                )
+            ok, encoded = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if not ok:
+                raise RuntimeError("JPEG encoding failed")
+            with run.lock:
+                # Stop/EOF/loop can happen during inference; never publish stale faces.
+                if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
+                    return
+                run.jpeg = encoded.tobytes()
+                if self.events is not None and search_status == "ready":
+                    self.events.submit_tracks(
+                        run.camera_id,
+                        frame.stream_session_id,
+                        faces,
+                        tracks,
+                        gallery_revision,
+                        time.monotonic(),
+                    )
+                if self.diagnostics is not None:
+                    self.diagnostics.submit_tracks(
+                        run.camera_id,
+                        frame.stream_session_id,
+                        frame,
+                        tracks,
+                        self.sampling_revision,
+                        search_status,
+                    )
+                run.result = {
+                    "stream_session_id": frame.stream_session_id,
+                    "frame_id": frame.frame_id,
+                    "captured_at": frame.captured_at,
+                    "tracks": tracks,
+                    "gallery_revision": gallery_revision,
+                    "search_status": search_status,
+                }
+                run.processed += 1
+                run.session_processed += 1
+                run.face_counts.update(face_counts)
+                if face_counts["analysis_frames"]:
+                    run.face_ms.append(face_ms)
+                    run.face_process_ms.append(face_process_ms)
+                    run.face_search_ms.append(face_search_ms)
+                run.max_people = max(run.max_people, len(tracks))
+                run.detection_ms.append(detection_ms)
+                run.latencies.append((time.monotonic() - frame.captured_mono) * 1000)
+                if run.state != "draining":
+                    run.state = "running"
+                    run.error_code = None
+        except Exception as exc:
+            with run.lock:
+                if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
+                    return
+                logging.getLogger("cctv.worker").error(
+                    "Camera %s inference failed; type=%s", run.camera_id, type(exc).__name__
+                )
+                run.fail("inference_failed")
 
     def analyze_reference(self, content):
         if self.face_analyzer is None or self.cancel.is_set():

@@ -1,6 +1,6 @@
 # CCTV Search
 
-비상업 시험용 CCTV 얼굴 검색 프로젝트. **Phase 7 Live Search에 로그·기능 설정 페이지와 움직임 대응 얼굴 분석 개선을 추가하고 서비스에 반영했다.** CCTV 목록·영상/추적·실시간 이벤트를 3열로 표시하며 등록/검출 얼굴 비교, 필터, 확인·거부와 재연결 복구를 제공한다. backend 110건과 실제 MariaDB 통합 1건, Chrome E2E 9건, frontend 논리 테스트 16건을 통과했다. DB migration head는 `0006_recognition_controls`다. Ubuntu native 서비스와 Python venv를 사용한다.
+비상업 시험용 CCTV 얼굴 검색 프로젝트. Phase 8 이벤트 영상 클립과 Phase 9 다중 카메라 측정·GPU 처리 개선을 서비스에 반영했다. DB migration head는 `0007_event_clips`다. 실제 인식 정확도 보정과 Person Re-ID는 후속 Phase에서 진행한다. Ubuntu native 서비스와 Python venv를 사용한다.
 
 로그인/카메라 관리에 더해 MP4 및 기본 RTSP 입력, YOLO11n 사람 탐지, ByteTrack 추적, 인증된 MJPEG 미리보기, 카메라별 영상 접근 권한, 별도 GPU worker와 1채널 benchmark를 사용할 수 있다. SCRFD 얼굴 탐지, 5-point alignment, 품질/자세 평가와 L2 정규화된 512차원 ArcFace 특징을 생성한다. 인물·다중 얼굴 등록, Memory/Qdrant cosine 검색, 인증된 등록 이미지와 인물별 권한, 삭제 재시도 및 이미지·특징별 보관 기간 정리를 제공한다. 전체 요구 사항은 [PLAN.md](PLAN.md), 구현 구성과 후속 설계는 [architecture.md](docs/architecture.md)를 참고한다.
 
@@ -378,3 +378,5 @@ npm --prefix frontend run test:e2e
 얼굴 크롭 구현과 검증 범위는 [face-crop-report.md](docs/face-crop-report.md)를 참고한다.
 
 Phase 8 이벤트 영상 클립을 서비스에 반영했다. DB head는 `0007_event_clips`이며 설치·실행·검증 및 한계는 [Phase 8 결과](docs/phase8-report.md)를 참고한다.
+
+다중 카메라 측정은 `scripts/benchmark.py --channels 1 2 4`로 실행하며 `--mode offline_throughput`은 별도의 파일 최대 처리량 모드다. 실제 1080p 측정 조건·수치·목표 미달 항목은 [Phase 9 결과](docs/phase9-report.md)를 참고한다.

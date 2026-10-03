@@ -115,7 +115,14 @@ def test_rtsp_reconnect_clears_faces_tracks_preview_and_session(app_context, mon
         assert client.get(path, params={"stream_session_id": old}).status_code == 404
         assert opened[0] == (
             cv2.CAP_FFMPEG,
-            [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 3000],
+            [
+                cv2.CAP_PROP_N_THREADS,
+                2,
+                cv2.CAP_PROP_OPEN_TIMEOUT_MSEC,
+                5000,
+                cv2.CAP_PROP_READ_TIMEOUT_MSEC,
+                3000,
+            ],
         )
         client.post("/internal/cameras/1/stop")
         assert all(cap.released for cap in (first, second))

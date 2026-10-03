@@ -129,3 +129,42 @@ def test_mp4_loop_creates_new_session_and_nonloop_ends(app_context):
         ended = wait_for(client, "/internal/cameras/7", lambda value: value["state"] == "ended")
         assert ended["processed_frames"] > 0
         assert client.get("/internal/cameras/7/frame").status_code == 204
+
+
+def test_shared_batch_rechecks_rotated_session_and_preserves_other_camera(app_context):
+    import threading
+
+    from app.worker.runtime import CameraRun, WorkerRuntime
+
+    entered, release = threading.Event(), threading.Event()
+
+    class BatchDetector(TestDetector):
+        def detect_batch(self, images):
+            assert len(images) == 2
+            entered.set()
+            assert release.wait(3)
+            return [boxes() for _ in images]
+
+    settings = app_context[2]
+    runtime = WorkerRuntime(settings, BatchDetector())
+    runs = [CameraRun(i, "", "mp4", False, settings) for i in (1, 2)]
+    try:
+        with runtime.lock:
+            for run in runs:
+                run.queue_frame(np.zeros((120, 160, 3), np.uint8))
+                runtime.runs[run.camera_id] = run
+        assert entered.wait(3)
+        with runs[0].lock:
+            runs[0].clear_session(rotate=True)
+        release.set()
+        deadline = time.monotonic() + 3
+        while runs[1].processed < 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert runs[0].processed == 0 and runs[0].result is None
+        assert runs[1].processed == 1 and runs[1].result["tracks"][0]["track_id"] == 1
+        assert runtime.scheduler_status()["batches_by_size"][2] == 1
+    finally:
+        release.set()
+        with runtime.lock:
+            runtime.runs.clear()
+        runtime.close()

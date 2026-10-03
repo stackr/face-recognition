@@ -35,6 +35,7 @@ class YoloPersonDetector:
         torch.set_num_threads(2)
         self.model = YOLO(str(path), task="detect")
         self.confidence = settings.detection_confidence
+        self.fp16 = settings.yolo_fp16 and self.device.startswith("cuda")
         self.detect(np.zeros((640, 640, 3), dtype=np.uint8))
         # Recent Ultralytics versions load a separate fused inference backend.
         # Verify the parameters that actually execute, rather than the CPU checkpoint.
@@ -48,28 +49,41 @@ class YoloPersonDetector:
             "gpu_name": torch.cuda.get_device_name(0) if actual.startswith("cuda") else None,
             "torch_version": torch.__version__,
             "torch_cuda": torch.version.cuda,
+            "precision": "float16" if self.fp16 else "float32",
+            "parameter_dtype": str(next(self.model.predictor.model.model.parameters()).dtype),
+            "resize": "long edge 640; stride-aligned rectangular padding; mixed shapes square 640",
+            "max_batch_size": settings.detector_batch_size,
             "status": "passed" if actual.startswith("cuda") else "cpu",
         }
 
     def detect(self, frame):
-        result = self.model.predict(
-            frame,
+        return self.detect_batch([frame])[0]
+
+    def detect_batch(self, frames):
+        if not frames or len(frames) > 4:
+            raise ValueError("Batch must contain 1..4 frames")
+        results = self.model.predict(
+            frames,
             classes=[0],
             conf=self.confidence,
             imgsz=640,
             max_det=100,
             device=self.device,
+            quantize=16 if self.fp16 else 32,
             verbose=False,
             save=False,
-        )[0]
-        return result.boxes.cpu().numpy()
+        )
+        return [result.boxes.cpu().numpy() for result in results]
 
     def resources(self):
+        import psutil
         import torch
 
+        rss = round(psutil.Process().memory_info().rss / 2**20, 1)
         if not self.device.startswith("cuda"):
-            return {"gpu_allocated_mb": 0, "gpu_reserved_mb": 0}
+            return {"gpu_allocated_mb": 0, "gpu_reserved_mb": 0, "rss_mb": rss}
         return {
+            "rss_mb": rss,
             "gpu_allocated_mb": round(torch.cuda.memory_allocated(0) / 2**20, 1),
             "gpu_reserved_mb": round(torch.cuda.memory_reserved(0) / 2**20, 1),
         }
