@@ -153,7 +153,8 @@ test('기능 설정·비교점수 즉시 반영, 사진 비교, 다중 프레임
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.screenshot({path:'../data/screenshots/recognition-logs-mobile.png'});
     const menu = await page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button').allTextContents();
-    expect(menu.at(-1)).toContain('인물 관리');
+    expect(menu.at(-2)).toContain('인물 관리');
+    expect(menu.at(-1)).toContain('얼굴 검출 테스트');
     expect(errors).toEqual([]);
   } finally {
     test.setTimeout(180000);

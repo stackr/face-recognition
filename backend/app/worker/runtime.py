@@ -347,6 +347,7 @@ class WorkerRuntime:
         self.reid_status = {"status": "disabled"}
         self.diagnostics = None
         self.clips = None
+        self.face_tests = None
         self.sampling_revision = sampling_revision
         self.pending_sampling = None
         self.batch_counts = Counter()
@@ -469,9 +470,15 @@ class WorkerRuntime:
                     try:
                         from app.worker.reference_images import analyze_reference
 
-                        future.set_result(analyze_reference(self.face_analyzer, content))
+                        future.set_result(
+                            content(self.face_analyzer)
+                            if callable(content)
+                            else analyze_reference(self.face_analyzer, content)
+                        )
                     except Exception as exc:
                         future.set_exception(exc)
+                # Do not keep the last upload/frame or returned vectors alive while idle.
+                del future, content
             with self.lock:
                 runs = list(self.runs.values())
             if runs:
@@ -701,7 +708,17 @@ class WorkerRuntime:
             future.cancel()
             raise
 
+    def submit_face_task(self, task):
+        """Video tests share the GPU thread with references and live analysis."""
+        if self.face_analyzer is None or self.cancel.is_set():
+            raise RuntimeError("Face analysis unavailable")
+        future = Future()
+        self.commands.put_nowait((future, task))
+        return future
+
     def close(self):
+        if self.face_tests:
+            self.face_tests.close()
         if self.clips:
             self.clips.close()
         self.cancel.set()

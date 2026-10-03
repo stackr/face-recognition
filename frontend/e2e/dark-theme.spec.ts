@@ -23,7 +23,7 @@ test('전체 페이지 다크 테마와 모바일 레이아웃', async ({page}) 
   try {
     for (const [path, title] of [
       ['dashboard', '시스템 준비 상태'], ['cameras', '카메라 관리'], ['live', 'Live Search'],
-      ['logs', '로그'], ['settings', '기능 설정'], ['persons', '인물 관리'], ['persons/new', '인물 추가']
+      ['logs', '로그'], ['settings', '기능 설정'], ['persons', '인물 관리'], ['persons/new', '인물 추가'], ['face-test', '얼굴 검출 테스트']
     ]) {
       await page.goto(`/#/${path}`);
       await expect(page.getByRole('heading', {name:title, exact:true})).toBeVisible();

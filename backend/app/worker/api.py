@@ -5,15 +5,23 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import cv2
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from app.core.config import Settings
 from app.worker.runtime import WorkerRuntime
+
+
+class FaceTestInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+    job_id: UUID
+    owner_id: int = Field(gt=0)
+    filename: str = Field(min_length=1, max_length=200)
 
 
 class StartInput(BaseModel):
@@ -106,6 +114,9 @@ def create_worker(
             app.state.runtime.diagnostics = DiagnosticsWriter(
                 settings, events.engine, app.state.runtime
             )
+        from app.worker.face_tests import FaceTestManager
+
+        app.state.runtime.face_tests = FaceTestManager(settings, app.state.runtime)
         logging.getLogger("cctv.worker").info(
             "Worker ready; device=%s model=%s",
             active_detector.info["actual_device"],
@@ -153,6 +164,63 @@ def create_worker(
             "scheduler": runtime.scheduler_status(),
             "clips": runtime.clips.status() if runtime.clips else {"status": "disabled"},
         }
+
+    @app.get("/internal/face-tests", dependencies=[Depends(authorized)])
+    def face_test_list(request: Request, owner_id: int = Query(gt=0)):
+        manager = request.app.state.runtime.face_tests
+        items = manager.list(owner_id)
+        return {
+            "items": items,
+            "can_start": (
+                manager.active is None
+                and len(items) < settings.face_test_max_jobs_per_user
+                and len(manager.jobs) < 100
+                and manager.runtime.face_analyzer is not None
+                and not manager.cancel.is_set()
+            ),
+            "limits": {
+                "upload_max_mb": settings.video_upload_max_mb,
+                "retention_hours": settings.face_test_retention_hours,
+                "max_duration_seconds": settings.face_test_max_duration_seconds,
+            },
+        }
+
+    @app.post("/internal/face-tests", dependencies=[Depends(authorized)])
+    def face_test_start(payload: FaceTestInput, request: Request):
+        try:
+            return request.app.state.runtime.face_tests.start(
+                str(payload.job_id), payload.owner_id, payload.filename
+            )
+        except OverflowError:
+            raise HTTPException(429, "Video test limit reached") from None
+        except ValueError:
+            raise HTTPException(422, "Invalid video test") from None
+        except RuntimeError:
+            raise HTTPException(503, "Face analysis unavailable") from None
+
+    @app.delete("/internal/face-tests", dependencies=[Depends(authorized)])
+    def face_test_delete(request: Request, owner_id: int = Query(gt=0)):
+        try:
+            return request.app.state.runtime.face_tests.delete_all(owner_id)
+        except TimeoutError:
+            raise HTTPException(503, "Video test deletion pending") from None
+
+    @app.get("/internal/face-tests/{job_id}", dependencies=[Depends(authorized)])
+    def face_test_status(job_id: UUID, request: Request, owner_id: int = Query(gt=0)):
+        try:
+            return request.app.state.runtime.face_tests.get(str(job_id), owner_id)
+        except KeyError:
+            raise HTTPException(404, "Video test unavailable") from None
+
+    @app.get(
+        "/internal/face-tests/{job_id}/groups/{group_id}/image", dependencies=[Depends(authorized)]
+    )
+    def face_test_image(job_id: UUID, group_id: int, request: Request, owner_id: int = Query(gt=0)):
+        try:
+            content = request.app.state.runtime.face_tests.image(str(job_id), group_id, owner_id)
+        except KeyError:
+            raise HTTPException(404, "Video test image unavailable") from None
+        return Response(content, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.get("/internal/settings", dependencies=[Depends(authorized)])
     def sampling(request: Request):

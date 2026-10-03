@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from qdrant_client import QdrantClient
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.api import analysis, auth, cameras, events, persons, recognition, system
+from app.api import analysis, auth, cameras, events, face_tests, persons, recognition, system
 from app.core.config import Settings
 from app.core.logging import configure_logging
 from app.core.security import LoginLimiter
@@ -78,6 +78,7 @@ def create_app(
     app.state.worker = WorkerClient(settings, worker_transport)
     app.state.viewers = ViewerLimits(settings)
     app.state.upload_lock = asyncio.Lock()
+    app.state.face_test_upload_lock = asyncio.Lock()
     app.state.reference_upload_lock = asyncio.Lock()
     app.state.camera_operations = CameraOperations()
     app.state.references = ReferenceService(settings, engine, vector_client, app.state.worker)
@@ -124,6 +125,7 @@ def create_app(
     app.include_router(system.router)
     app.include_router(events.router)
     app.include_router(recognition.router)
+    app.include_router(face_tests.router)
     return app
 
 

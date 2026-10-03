@@ -55,6 +55,13 @@ class Settings(BaseSettings):
     face_max_yaw: float = Field(default=40, ge=5, le=80)
     face_max_pitch: float = Field(default=30, ge=5, le=80)
     face_max_roll: float = Field(default=35, ge=5, le=80)
+    face_test_dir: Path = ROOT / "data/face-tests"
+    face_test_retention_hours: int = Field(default=24, ge=1, le=168)
+    face_test_storage_max_mb: int = Field(default=1000, ge=200, le=10000)
+    face_test_max_jobs_per_user: int = Field(default=10, ge=1, le=100)
+    face_test_max_groups: int = Field(default=500, ge=1, le=2000)
+    face_test_max_faces_per_frame: int = Field(default=100, ge=1, le=500)
+    face_test_max_duration_seconds: int = Field(default=3600, ge=1, le=14400)
     video_dir: Path = ROOT / "data/videos"
     detection_fps: float = Field(default=5, ge=1, le=15)
     capture_decode_threads: int = Field(default=2, ge=1, le=8)
@@ -157,6 +164,7 @@ class Settings(BaseSettings):
         "clip_dir",
         "clip_buffer_dir",
         "video_dir",
+        "face_test_dir",
         "log_dir",
         "gpu_report_path",
     )

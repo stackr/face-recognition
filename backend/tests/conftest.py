@@ -24,6 +24,7 @@ def app_context(tmp_path):
         log_dir=tmp_path / "logs",
         gpu_report_path=tmp_path / "gpu.json",
         video_dir=tmp_path / "videos",
+        face_test_dir=tmp_path / "face-tests",
         reference_dir=tmp_path / "references",
         event_dir=tmp_path / "events",
         clip_dir=tmp_path / "clips",

@@ -7,6 +7,7 @@ import { FaceCropperComponent } from './face-cropper.component';
 import { EventPanelComponent } from './event-panel.component';
 import { FunctionSettingsComponent } from './function-settings.component';
 import { RecognitionLogsComponent } from './recognition-logs.component';
+import { FaceTestComponent } from './face-test.component';
 
 interface User { id: number; username: string; role: string; }
 interface Auth { user: User; csrf_token: string; }
@@ -47,7 +48,7 @@ interface SystemStatus {
 }
 
 @Component({
-  selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule, FaceCropperComponent, EventPanelComponent, FunctionSettingsComponent, RecognitionLogsComponent],
+  selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule, FaceCropperComponent, EventPanelComponent, FunctionSettingsComponent, RecognitionLogsComponent, FaceTestComponent],
   templateUrl: './app.component.html'
 })
 export class AppComponent implements OnDestroy {
@@ -57,7 +58,7 @@ export class AppComponent implements OnDestroy {
   loading = signal(true);
   busy = signal(false);
   backend = signal('확인 중');
-  view = signal<'dashboard' | 'cameras' | 'persons' | 'person-editor' | 'live' | 'logs' | 'settings'>('dashboard');
+  view = signal<'dashboard' | 'cameras' | 'persons' | 'person-editor' | 'live' | 'logs' | 'settings' | 'face-test'>('dashboard');
   controlsRefresh = signal(0);
   status = signal<SystemStatus | null>(null);
   cameras = signal<Camera[]>([]);
@@ -172,7 +173,7 @@ export class AppComponent implements OnDestroy {
         }
       });
     } else {
-      this.view.set(live ? 'live' : path === 'persons' || path === 'cameras' || path === 'logs' || path === 'settings' ? path : 'dashboard');
+      this.view.set(live ? 'live' : path === 'persons' || path === 'cameras' || path === 'logs' || path === 'settings' || path === 'face-test' ? path : 'dashboard');
       if (path === 'persons') this.refreshPersons();
       if (path === 'logs') this.refresh();
       if (live && this.camerasLoaded) {
@@ -188,7 +189,7 @@ export class AppComponent implements OnDestroy {
   pageTitle() {
     if (this.view() === 'person-editor') return this.user()?.role === 'admin'
       ? (this.personEditingId === null ? '인물 추가' : '인물 수정') : '인물 정보';
-    return {dashboard:'시스템 준비 상태', cameras:'카메라 관리', persons:'인물 관리', live:'Live Search', logs:'로그', settings:'기능 설정'}[this.view() as 'dashboard' | 'cameras' | 'persons' | 'live' | 'logs' | 'settings'];
+    return {dashboard:'시스템 준비 상태', cameras:'카메라 관리', persons:'인물 관리', live:'Live Search', logs:'로그', settings:'기능 설정', 'face-test':'얼굴 검출 테스트'}[this.view() as 'dashboard' | 'cameras' | 'persons' | 'live' | 'logs' | 'settings' | 'face-test'];
   }
 
   login() {
@@ -241,7 +242,7 @@ export class AppComponent implements OnDestroy {
 
   refreshPage() {
     if (this.busy()) return;
-    if (this.view() === 'logs' || this.view() === 'settings') {if (this.view() === 'logs') this.refresh(); this.controlsRefresh.update(value => value + 1); return;}
+    if (this.view() === 'logs' || this.view() === 'settings' || this.view() === 'face-test') {if (this.view() === 'logs') this.refresh(); this.controlsRefresh.update(value => value + 1); return;}
     if (this.view() === 'person-editor') this.applyRoute();
     else { this.refresh(); this.refreshAnalysis(); }
   }

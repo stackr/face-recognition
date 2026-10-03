@@ -18,10 +18,11 @@ const cropper = compile('../src/app/face-cropper.component.ts');
 const events = compile('../src/app/event-panel.component.ts');
 const labels = compile('../src/app/recognition-labels.ts');
 const settings = compile('../src/app/function-settings.component.ts');
+const faceTest = compile('../src/app/face-test.component.ts');
 const logs = compile('../src/app/recognition-logs.component.ts', {'./recognition-labels':labels});
 const {AppComponent} = await import(compile('../src/app/app.component.ts', {
   './face-cropper.component':cropper, './event-panel.component':events,
-  './function-settings.component':settings, './recognition-logs.component':logs
+  './function-settings.component':settings, './recognition-logs.component':logs, './face-test.component':faceTest
 }));
 
 function setup() {

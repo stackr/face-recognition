@@ -39,6 +39,9 @@
 .form-control:hover:not(:disabled)::file-selector-button { background: var(--hover); }
 .btn-primary { --bs-btn-color: #0b1834; --bs-btn-hover-color: #0b1834; --bs-btn-hover-bg: #9cb5ff; --bs-btn-hover-border-color: #9cb5ff; --bs-btn-active-color: #0b1834; --bs-btn-active-bg: #9cb5ff; --bs-btn-active-border-color: #9cb5ff; --bs-btn-disabled-color: #0b1834; --bs-btn-disabled-bg: var(--accent); --bs-btn-disabled-border-color: var(--accent); }
 .btn-outline-secondary { --bs-btn-color: var(--muted); --bs-btn-border-color: #71829d; --bs-btn-hover-bg: var(--hover); --bs-btn-hover-color: var(--ink); --bs-btn-hover-border-color: var(--muted); --bs-btn-disabled-color: var(--muted); }
+.btn-outline-primary { --bs-btn-color: #9cb5ff; --bs-btn-border-color: var(--accent); --bs-btn-hover-bg: var(--accent); --bs-btn-hover-color: #0b1834; --bs-btn-active-bg: var(--accent); --bs-btn-active-color: #0b1834; --bs-btn-disabled-color: #9cb5ff; }
+.btn-outline-danger { --bs-btn-color: #ff929e; --bs-btn-border-color: #ca6272; --bs-btn-hover-bg: #ff929e; --bs-btn-hover-border-color: #ff929e; --bs-btn-hover-color: #28131c; --bs-btn-active-bg: #ff929e; --bs-btn-active-color: #28131c; --bs-btn-disabled-color: #ff929e; }
+.badge.text-bg-light { background-color: var(--surface-raised) !important; color: var(--muted) !important; border: 1px solid var(--border); }
 .sidebar button:hover:not(:disabled):not(.active) { background: var(--hover); color: var(--ink); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .settings-state, .function-settings-form, .recognition-features, .log-filters, .log-summary, .recognition-log-list {padding: 24px; margin-bottom: 22px; min-width: 0;}
@@ -217,4 +220,31 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: -appl
   .live-main .analysis-controls {padding: 16px;}
   .live-main .preview-heading {flex-wrap: wrap;}
   .event-card-heading {flex-wrap: wrap;}
+}
+
+.face-test-upload, .face-test-results {padding: 24px; margin-bottom: 24px; min-width: 0;}
+.face-test-upload h2, .face-test-results h2 {font-size: 18px; margin-bottom: 18px;}
+.face-test-upload form {margin-bottom: 20px;}
+.face-test-help {font-size: 12px; color: var(--muted); line-height: 1.8; margin: 10px 0 18px;}
+.face-test-list-heading {display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px;}
+.face-test-list-heading h2 {margin-bottom: 6px;}
+.face-test-list-heading span, .face-test-list-heading .btn {font-size: 13px;}
+.face-test-progress {display: flex; align-items: center; flex-wrap: wrap; gap: 12px; padding: 16px; background: var(--surface-raised); border-radius: 8px; margin-bottom: 20px; overflow-wrap: anywhere; font-size: 13px;}
+.face-test-progress > span:first-of-type {min-width: 0; overflow-wrap: anywhere;}
+.face-test-progress small {flex-basis: 100%; color: var(--muted);}
+.face-test-progress progress {height: 8px; width: min(100%, 220px); accent-color: var(--accent);}
+.face-test-grid {display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr)); gap: 18px;}
+.face-test-card {border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface-raised); min-width: 0;}
+.face-test-card img {width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; display: block; background: var(--page);}
+.face-test-card > div {padding: 14px;}
+.face-test-card h3 {font-size: 15px; margin-bottom: 8px;}
+.face-test-card span, .face-test-card small {display: block; font-size: 12px; color: var(--muted); line-height: 1.8;}
+.face-test-card small {font-size: 11px;}
+.face-test-card .face-test-unresolved {color: var(--warning);}
+.face-test-empty {grid-column: 1 / -1; text-align: center; padding: 36px 12px; color: var(--muted); font-size: 13px;}
+@media (max-width: 600px) {
+  .face-test-upload, .face-test-results {padding: 18px 14px;}
+  .face-test-list-heading {align-items: flex-start; flex-wrap: wrap;}
+  .face-test-grid {grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;}
+  .face-test-card > div {padding: 10px;}
 }

@@ -216,7 +216,7 @@ class FaceModels:
         session = self.sessions[name]
         return session.run(None, {session.get_inputs()[0].name: blob})
 
-    def detect(self, image, side=320):
+    def detect(self, image, side=320, *, max_faces=10):
         if side not in {320, 640}:
             raise ValueError("Invalid detector size")
         height, width = image.shape[:2]
@@ -250,7 +250,7 @@ class FaceModels:
             np.concatenate(all_scores),
         )
         order, selected = scores.argsort()[::-1], []
-        while len(order) and len(selected) < 10:
+        while len(order) and (max_faces is None or len(selected) < max_faces):
             current, rest = int(order[0]), order[1:]
             selected.append(current)
             intersection = np.maximum(

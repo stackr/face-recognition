@@ -1,0 +1,37 @@
+@if (error()) {<div class="alert alert-danger" role="alert">{{ error() }}</div>}
+@if (notice()) {<div class="alert alert-info" role="status">{{ notice() }}</div>}
+<section class="card face-test-upload">
+  <h2>시험 영상 업로드</h2>
+  <form (submit)="$event.preventDefault(); analyze()">
+    <label for="face-test-video" class="form-label">분석할 영상 파일</label>
+    <input #videoInput id="face-test-video" type="file" accept="video/*,.mp4,.mov,.avi,.mkv,.webm" class="form-control" (change)="selectVideo($event)" [disabled]="uploading() || deleting()">
+    <p class="face-test-help">{{ result()?.limits?.upload_max_mb ?? 200 }} MB 이하 · 최대 {{ (result()?.limits?.max_duration_seconds ?? 3600) / 60 }}분 · 3840×2160 이하. MP4, MOV, AVI, MKV, WebM 등 서버에서 읽을 수 있는 영상.</p>
+    <button type="submit" class="btn btn-primary" [disabled]="!selectedFile() || !result()?.can_start || uploading() || deleting()">{{ uploading() ? '영상 업로드 중…' : '영상 분석' }}</button>
+    @if (uploading()) {<p class="face-test-help" role="status">영상 업로드 중{{ uploadPercent() !== null ? ' · ' + uploadPercent() + '%' : '…' }}</p>}
+  </form>
+  <p class="face-test-help mb-0">모든 프레임에서 얼굴을 검출하고, 같은 영상 안에서 유사한 얼굴을 묶어 가장 선명한 사진 한 장을 표시합니다. 흐릿하거나 옆으로 향한 얼굴은 묶음이 나뉘거나 섞일 수 있습니다. 사진과 목록은 {{ result()?.limits?.retention_hours ?? 24 }}시간 후 자동 삭제됩니다.</p>
+  @if (result() && !result()!.can_start && !hasActiveJob()) {<p class="face-test-help">다른 영상 분석이 진행 중이거나 보관 목록이 가득 찼습니다. 잠시 기다리거나 목록을 삭제해 주세요.</p>}
+</section>
+<section class="card face-test-results" aria-label="추출 얼굴 목록">
+  <div class="face-test-list-heading"><div><h2>추출 얼굴</h2><span class="text-secondary">{{ current()?.groups?.length ?? 0 }}개 인물 묶음</span></div><button class="btn btn-outline-danger" type="button" (click)="deleteAll()" [disabled]="!result()?.items?.length || uploading() || deleting()">{{ deleting() ? '삭제 중…' : '목록 전체 삭제' }}</button></div>
+  @if ((result()?.items?.length ?? 0) > 1) {
+    <label for="face-test-history" class="form-label">분석 결과 영상</label><select id="face-test-history" class="form-select mb-3" [value]="selectedId()" (change)="selectJob($event)">@for (job of result()!.items; track job.job_id) {<option [value]="job.job_id">{{ job.filename }} · {{ stateLabel(job.state) }}</option>}</select>
+  }
+  @if (current(); as job) {
+    <div class="face-test-progress" role="status" [attr.aria-busy]="active(job)">
+      <strong>{{ stateLabel(job.state) }}</strong><span>{{ job.filename }}</span>
+      <span>{{ job.processed_frames | number }} / {{ job.total_frames !== null ? (job.total_frames | number) : '확인 중' }} 프레임 · 얼굴 {{ job.detections | number }}회 검출</span>
+      @if (job.progress_percent !== null) {<progress [value]="job.progress_percent" max="100" aria-label="영상 분석 진행률"></progress><span>{{ job.progress_percent }}%</span>}
+      <small>같은 얼굴 묶기 기준 {{ job.threshold | number:'1.2-2' }} · {{ job.actual_device }}</small>
+    </div>
+    @if (job.state === 'failed') {<div class="alert alert-warning" role="alert">{{ errorLabel(job.error_code) }} 아래는 중단 전까지 추출한 결과입니다.</div>}
+    <div class="face-test-grid">
+      @for (group of job.groups; track group.group_id) {
+        <article class="face-test-card"><img [src]="imageUrl(job, group)" [alt]="'인물 ' + group.group_id + ' 대표 얼굴'" loading="lazy" width="256" height="256">
+          <div><h3>인물 {{ group.group_id }}</h3><span>{{ group.occurrences | number }}회 검출</span><small>첫 등장 {{ group.first_seen_seconds | number:'1.1-1' }}초 · 마지막 {{ group.last_seen_seconds | number:'1.1-1' }}초</small>
+          @if (!group.embedding_ready) {<small class="face-test-unresolved">얼굴 비교 불가 · 위치로 임시 묶음</small>}</div>
+        </article>
+      } @empty {<p class="face-test-empty">{{ active(job) ? '얼굴을 찾고 있습니다. 추출되는 대로 표시합니다.' : job.state === 'completed' ? '이 영상에서 검출된 얼굴이 없습니다.' : '추출된 얼굴이 없습니다.' }}</p>}
+    </div>
+  } @else {<p class="face-test-empty">{{ loading() ? '분석 목록을 불러오고 있습니다.' : '영상을 선택하고 [영상 분석] 버튼을 눌러 주세요.' }}</p>}
+</section>
