@@ -27,6 +27,8 @@ test('전체 페이지 다크 테마와 모바일 레이아웃', async ({page}) 
     ]) {
       await page.goto(`/#/${path}`);
       await expect(page.getByRole('heading', {name:title, exact:true})).toBeVisible();
+      await expect(page.locator('.live-search-layout')).toHaveCount(path === 'live' ? 1 : 0);
+      await expect(page.locator('app-event-panel')).toHaveCount(path === 'live' ? 1 : 0);
       await expect.poll(() => background('.sidebar')).toBe('rgb(23, 34, 53)');
       for (const color of await page.locator('.workspace .card').evaluateAll(elements => elements.map(element => getComputedStyle(element).backgroundColor))) {
         expect(color).toBe('rgb(23, 34, 53)');
