@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 from app.core.face_test_data import private_directory, write_metadata
 from app.worker.api import create_worker
-from app.worker.face_onnx import TEMPLATE
+from app.worker.face_onnx import TEMPLATE, FaceModels
 from app.worker.face_tests import FaceTestManager
 from app.worker.video_faces import ExtractedFace, FaceGroups, VideoTestError, detect_all
 from conftest import TEST_PASSWORD
@@ -116,6 +116,55 @@ def test_overlapping_tiles_cover_edges_and_deduplicate_same_face():
     assert len(detect_all(Models(), image, 100, threading.Event())) == 2
     assert len(calls) > 1
     assert any(x + w == 1920 and y + h == 1080 for x, y, w, h in calls)
+    assert len(detect_all(Models(), image, 100, threading.Event(), min_face_size=50)) == 2
+    assert detect_all(Models(), image, 100, threading.Event(), min_face_size=51) == []
+
+
+def test_per_call_confidence_filters_onnx_scores_without_changing_live_default():
+    class Models(FaceModels):
+        def __init__(self):
+            self.settings = SimpleNamespace(face_detection_threshold=0.5)
+
+        def run(self, name, image, side, mean, std):
+            assert name == "det_10g.onnx"
+            counts = [2 * (side // stride) ** 2 for stride in (8, 16, 32)]
+            scores = [np.zeros(count, np.float32) for count in counts]
+            scores[0][(10 * (side // 8) + 10) * 2] = 0.6
+            scores[0][(25 * (side // 8) + 25) * 2] = 0.9
+            return (
+                scores
+                + [np.ones((count, 4), np.float32) for count in counts]
+                + [np.zeros((count, 5, 2), np.float32) for count in counts]
+            )
+
+    models = Models()
+    image = np.zeros((320, 320, 3), np.uint8)
+    assert len(models.detect(image)) == 2
+    assert len(models.detect(image, score_threshold=0.8)) == 1
+    assert models.detect(image, score_threshold=0.95) == []
+    assert models.settings.face_detection_threshold == 0.5
+    assert len(models.detect(image)) == 2
+
+
+def test_minimum_size_uses_shorter_original_frame_side_after_clipping():
+    class Models:
+        def detect(self, image, *, side, max_faces, score_threshold):
+            assert score_threshold == 0.8
+            return [
+                {"bbox": np.array(box), "landmarks": TEMPLATE, "confidence": 0.9}
+                for box in [
+                    (10, 10, 34, 70),
+                    (50, 10, 90, 41),
+                    (100, 10, 140, 42),
+                    (280, 10, 340, 70),
+                ]
+            ]
+
+    image = np.zeros((120, 300, 3), np.uint8)
+    faces = detect_all(
+        Models(), image, 100, threading.Event(), detection_threshold=0.8, min_face_size=32
+    )
+    assert len(faces) == 1 and np.array_equal(faces[0]["bbox"], [100, 10, 140, 42])
 
 
 class EmptyFaces:
@@ -124,9 +173,11 @@ class EmptyFaces:
     def __init__(self):
         self.models = self
         self.calls = 0
+        self.thresholds = []
 
     def detect(self, image, **kwargs):
         self.calls += 1
+        self.thresholds.append(kwargs.get("score_threshold"))
         return []
 
 
@@ -155,7 +206,8 @@ def upload_file(manager, content):
     return job_id
 
 
-def test_job_analyzes_every_frame_without_sampling_and_preserves_empty_result(app_context):
+@pytest.mark.parametrize("options", [{}, {"detection_threshold": 0.85, "min_face_size": 48}])
+def test_job_analyzes_every_frame_without_sampling_and_preserves_empty_result(app_context, options):
     settings = app_context[2]
     analyzer = EmptyFaces()
     runtime = SimpleNamespace(
@@ -168,11 +220,20 @@ def test_job_analyzes_every_frame_without_sampling_and_preserves_empty_result(ap
     manager = FaceTestManager(settings, runtime)
     try:
         job_id = upload_file(manager, video.read_bytes())
-        manager.start(job_id, 1, "blank.mp4")
+        original_threshold = settings.face_detection_threshold
+        manager.start(job_id, 1, "blank.mp4", **options)
         result = await_job(manager, job_id)
         assert result["state"] == "completed"
         assert result["processed_frames"] == result["total_frames"] == analyzer.calls == 20
         assert result["progress_percent"] == 100 and result["groups"] == []
+        expected_threshold = options.get("detection_threshold", original_threshold)
+        assert result["detection_threshold"] == expected_threshold
+        assert result["min_face_size"] == options.get("min_face_size", 8)
+        assert analyzer.thresholds == [expected_threshold] * 20
+        assert settings.face_detection_threshold == original_threshold
+        saved = json.loads((manager.root / job_id / "job.json").read_text())
+        assert saved["detection_threshold"] == expected_threshold
+        assert saved["min_face_size"] == result["min_face_size"]
         assert not (manager.root / job_id / "source.video").exists()
         assert "owner_id" not in result
         with pytest.raises(KeyError):
@@ -273,6 +334,7 @@ def test_authenticated_api_upload_limits_csrf_and_owner_boundary(app_context, ad
         if request.method == "POST":
             payload = json.loads(request.content)
             assert payload["owner_id"] == 1 and payload["filename"] == "test.mp4"
+            assert payload["detection_threshold"] == 0.83 and payload["min_face_size"] == 48
             path = settings.face_test_dir / ".incoming" / f"{payload['job_id']}.video"
             assert path.read_bytes() == b"video"
             assert path.stat().st_mode & 0o777 == 0o600
@@ -292,7 +354,7 @@ def test_authenticated_api_upload_limits_csrf_and_owner_boundary(app_context, ad
         client.post("/api/face-tests", content=b"video", headers=admin_headers).status_code == 415
     )
     response = client.post(
-        "/api/face-tests?filename=test.mp4",
+        "/api/face-tests?filename=test.mp4&detection_threshold=0.83&min_face_size=48",
         content=b"video",
         headers={**admin_headers, "Content-Type": "video/mp4"},
     )
@@ -315,6 +377,40 @@ def test_authenticated_api_upload_limits_csrf_and_owner_boundary(app_context, ad
     assert client.get(f"/api/face-tests/{job_id}/groups/1/image").status_code == 401
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "detection_threshold=0.09",
+        "detection_threshold=1",
+        "detection_threshold=nan",
+        "detection_threshold=inf",
+        "min_face_size=7",
+        "min_face_size=513",
+        "min_face_size=32.5",
+        "min_face_size=",
+    ],
+)
+def test_invalid_detection_settings_rejected_before_storing_upload(
+    app_context, admin_headers, query
+):
+    client, _, settings = app_context
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(500)
+
+    replace_worker(client, handler)
+    response = client.post(
+        f"/api/face-tests?{query}",
+        content=b"video",
+        headers={**admin_headers, "Content-Type": "video/mp4"},
+    )
+    assert response.status_code == 422
+    assert calls == []
+    assert not list(settings.face_test_dir.rglob("*.video"))
+
+
 def test_worker_all_frame_tasks_use_shared_scheduler_and_require_service_auth(app_context):
     settings = app_context[2]
     analyzer = EmptyFaces()
@@ -323,10 +419,28 @@ def test_worker_all_frame_tasks_use_shared_scheduler_and_require_service_auth(ap
     ) as client:
         assert client.get("/internal/face-tests?owner_id=1").status_code == 401
         client.headers["X-Service-Token"] = settings.service_token.get_secret_value()
+        assert client.get("/internal/face-tests?owner_id=1").json()["defaults"] == {
+            "detection_threshold": settings.face_detection_threshold,
+            "min_face_size": 8,
+        }
         video = settings.video_dir / "scheduled.mp4"
         write_video(video, seconds=1)
         manager = client.app.state.runtime.face_tests
         job_id = upload_file(manager, video.read_bytes())
+        assert (
+            client.post(
+                "/internal/face-tests",
+                json={
+                    "job_id": job_id,
+                    "owner_id": 1,
+                    "filename": "scheduled.mp4",
+                    "min_face_size": 7,
+                },
+            ).status_code
+            == 422
+        )
+        assert (manager.incoming / f"{job_id}.video").exists()
+        assert manager.list(1) == []
         assert (
             client.post(
                 "/internal/face-tests",
@@ -340,6 +454,8 @@ def test_worker_all_frame_tasks_use_shared_scheduler_and_require_service_auth(ap
             lambda value: value["state"] == "completed",
         )
         assert result["processed_frames"] == analyzer.calls == 20
+        assert result["detection_threshold"] == settings.face_detection_threshold
+        assert result["min_face_size"] == 8
         assert client.get(f"/internal/face-tests/{job_id}?owner_id=2").status_code == 404
         assert (
             client.get(f"/internal/face-tests/{job_id}/groups/1/image?owner_id=2").status_code

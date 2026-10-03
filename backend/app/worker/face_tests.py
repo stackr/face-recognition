@@ -19,6 +19,7 @@ from app.core.face_test_data import (
     write_metadata,
     write_private,
 )
+from app.schemas.face_tests import DEFAULT_MIN_FACE_SIZE, FaceTestOptions
 from app.worker.video_faces import FaceGroups, VideoTestError, analyze_frame
 
 ACTIVE = {"queued", "running"}
@@ -103,8 +104,24 @@ class FaceTestManager:
             except OSError:
                 raise KeyError(group_id) from None
 
-    def start(self, job_id, owner_id, filename):
+    def start(
+        self,
+        job_id,
+        owner_id,
+        filename,
+        *,
+        detection_threshold=None,
+        min_face_size=DEFAULT_MIN_FACE_SIZE,
+    ):
         identifier(job_id)
+        options = FaceTestOptions(
+            detection_threshold=(
+                self.settings.face_detection_threshold
+                if detection_threshold is None
+                else detection_threshold
+            ),
+            min_face_size=min_face_size,
+        )
         source = self.incoming / f"{job_id}.video"
         with self.mutation, self.lock:
             if self.cancel.is_set() or self.runtime.face_analyzer is None:
@@ -139,6 +156,7 @@ class FaceTestManager:
                 "duration_seconds": None,
                 "progress_percent": 0,
                 "threshold": self.runtime.settings.face_match_threshold,
+                **options.model_dump(),
                 "actual_device": self.runtime.face_analyzer.info.get("actual_device", "unknown"),
                 "groups": [],
             }
@@ -167,14 +185,18 @@ class FaceTestManager:
             metadata.update(updates)
             write_metadata(self.root / job_id / "job.json", metadata)
 
-    def _infer(self, image, cancellation):
+    def _infer(self, image, cancellation, options):
         while True:
             if cancellation.is_set() or self.cancel.is_set():
                 raise VideoTestError("cancelled")
             try:
                 future = self.runtime.submit_face_task(
                     lambda analyzer: analyze_frame(
-                        analyzer, image, self.settings.face_test_max_faces_per_frame, cancellation
+                        analyzer,
+                        image,
+                        self.settings.face_test_max_faces_per_frame,
+                        cancellation,
+                        **options,
                     )
                 )
                 break
@@ -194,6 +216,7 @@ class FaceTestManager:
         directory = self.root / job_id
         cap = None
         groups = FaceGroups(self.jobs[job_id]["threshold"], self.settings.face_test_max_groups)
+        options = {key: self.jobs[job_id][key] for key in ("detection_threshold", "min_face_size")}
         processed = detections = 0
         try:
             cap = cv2.VideoCapture(
@@ -233,7 +256,7 @@ class FaceTestManager:
                 previous_seconds = seconds
                 if seconds > self.settings.face_test_max_duration_seconds or processed >= 432000:
                     raise VideoTestError("duration_limit_exceeded")
-                faces = self._infer(image, cancellation)
+                faces = self._infer(image, cancellation, options)
                 processed += 1
                 detections += len(faces)
                 for group_id, content in groups.add_frame(faces, processed, seconds):

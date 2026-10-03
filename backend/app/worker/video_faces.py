@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 
 from app.core.face_data import normalized_embedding
+from app.schemas.face_tests import DEFAULT_MIN_FACE_SIZE
 from app.worker.face_onnx import align_face
 
 
@@ -36,7 +37,15 @@ def tile_starts(length, side=960, step=768):
     return sorted(set([*range(0, length - side + 1, step), length - side]))
 
 
-def detect_all(models, image, maximum, cancel):
+def detect_all(
+    models,
+    image,
+    maximum,
+    cancel,
+    *,
+    detection_threshold=None,
+    min_face_size=DEFAULT_MIN_FACE_SIZE,
+):
     height, width = image.shape[:2]
     regions = [(0, 0, width, height)]
     if width > 960 or height > 960:
@@ -50,7 +59,10 @@ def detect_all(models, image, maximum, cancel):
         if cancel.is_set():
             raise VideoTestError("cancelled")
         # Remove the live model's ten-face cap. No YOLO person ROI or sampling cap.
-        detected = models.detect(image[y:bottom, x:right], side=640, max_faces=None)
+        options = (
+            {"score_threshold": detection_threshold} if detection_threshold is not None else {}
+        )
+        detected = models.detect(image[y:bottom, x:right], side=640, max_faces=None, **options)
         for detected_face in detected:
             box = np.asarray(detected_face["bbox"], dtype=np.float64) + [x, y, x, y]
             points = np.asarray(detected_face["landmarks"], dtype=np.float64) + [x, y]
@@ -58,7 +70,7 @@ def detect_all(models, image, maximum, cancel):
                 continue
             box[:2] = np.maximum(box[:2], 0)
             box[2:] = np.minimum(box[2:], [width, height])
-            if min(box[2:] - box[:2]) < 8:
+            if min(box[2:] - box[:2]) < min_face_size:
                 continue
             faces.append(detected_face | {"bbox": box, "landmarks": points})
     selected = []
@@ -79,10 +91,25 @@ class ExtractedFace:
     quality: float
 
 
-def analyze_frame(analyzer, image, maximum, cancel):
+def analyze_frame(
+    analyzer,
+    image,
+    maximum,
+    cancel,
+    *,
+    detection_threshold=None,
+    min_face_size=DEFAULT_MIN_FACE_SIZE,
+):
     faces = []
     height, width = image.shape[:2]
-    for face in detect_all(analyzer.models, image, maximum, cancel):
+    for face in detect_all(
+        analyzer.models,
+        image,
+        maximum,
+        cancel,
+        detection_threshold=detection_threshold,
+        min_face_size=min_face_size,
+    ):
         if cancel.is_set():
             raise VideoTestError("cancelled")
         box = face["bbox"]

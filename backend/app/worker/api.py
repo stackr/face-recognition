@@ -14,11 +14,11 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from app.core.config import Settings
+from app.schemas.face_tests import DEFAULT_MIN_FACE_SIZE, FaceTestOptions
 from app.worker.runtime import WorkerRuntime
 
 
-class FaceTestInput(BaseModel):
-    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+class FaceTestInput(FaceTestOptions):
     job_id: UUID
     owner_id: int = Field(gt=0)
     filename: str = Field(min_length=1, max_length=200)
@@ -171,6 +171,10 @@ def create_worker(
         items = manager.list(owner_id)
         return {
             "items": items,
+            "defaults": {
+                "detection_threshold": settings.face_detection_threshold,
+                "min_face_size": DEFAULT_MIN_FACE_SIZE,
+            },
             "can_start": (
                 manager.active is None
                 and len(items) < settings.face_test_max_jobs_per_user
@@ -189,7 +193,11 @@ def create_worker(
     def face_test_start(payload: FaceTestInput, request: Request):
         try:
             return request.app.state.runtime.face_tests.start(
-                str(payload.job_id), payload.owner_id, payload.filename
+                str(payload.job_id),
+                payload.owner_id,
+                payload.filename,
+                detection_threshold=payload.detection_threshold,
+                min_face_size=payload.min_face_size,
             )
         except OverflowError:
             raise HTTPException(429, "Video test limit reached") from None

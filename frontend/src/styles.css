@@ -225,6 +225,8 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: -appl
 .face-test-upload, .face-test-results {padding: 24px; margin-bottom: 24px; min-width: 0;}
 .face-test-upload h2, .face-test-results h2 {font-size: 18px; margin-bottom: 18px;}
 .face-test-upload form {margin-bottom: 20px;}
+.face-test-settings {display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px;}
+.face-test-settings .face-test-help {margin-bottom: 0;}
 .face-test-help {font-size: 12px; color: var(--muted); line-height: 1.8; margin: 10px 0 18px;}
 .face-test-list-heading {display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px;}
 .face-test-list-heading h2 {margin-bottom: 6px;}
@@ -244,6 +246,7 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: -appl
 .face-test-empty {grid-column: 1 / -1; text-align: center; padding: 36px 12px; color: var(--muted); font-size: 13px;}
 @media (max-width: 600px) {
   .face-test-upload, .face-test-results {padding: 18px 14px;}
+  .face-test-settings {grid-template-columns: 1fr; gap: 12px;}
   .face-test-list-heading {align-items: flex-start; flex-wrap: wrap;}
   .face-test-grid {grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;}
   .face-test-card > div {padding: 10px;}

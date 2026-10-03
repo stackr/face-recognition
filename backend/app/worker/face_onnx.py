@@ -216,10 +216,13 @@ class FaceModels:
         session = self.sessions[name]
         return session.run(None, {session.get_inputs()[0].name: blob})
 
-    def detect(self, image, side=320, *, max_faces=10):
+    def detect(self, image, side=320, *, max_faces=10, score_threshold=None):
         if side not in {320, 640}:
             raise ValueError("Invalid detector size")
         height, width = image.shape[:2]
+        threshold = (
+            self.settings.face_detection_threshold if score_threshold is None else score_threshold
+        )
         scale = min(side / width, side / height)
         rw, rh = max(1, round(width * scale)), max(1, round(height * scale))
         canvas = np.zeros((side, side, 3), dtype=np.uint8)
@@ -232,7 +235,7 @@ class FaceModels:
             offsets = outputs[index + 6].reshape(-1, 5, 2) * stride
             coordinates = np.mgrid[: side // stride, : side // stride][::-1].transpose(1, 2, 0)
             anchors = np.repeat(coordinates.reshape(-1, 2) * stride, 2, axis=0)
-            keep = np.flatnonzero(scores >= self.settings.face_detection_threshold)
+            keep = np.flatnonzero(scores >= threshold)
             if not len(keep):
                 continue
             centers, distances = anchors[keep], distances[keep]

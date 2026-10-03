@@ -11,6 +11,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.api.dependencies import current_user
 from app.core.face_test_data import private_directory, storage_size
+from app.schemas.face_tests import DEFAULT_MIN_FACE_SIZE
 
 router = APIRouter(prefix="/api/face-tests", tags=["Face detection tests"])
 
@@ -26,6 +27,8 @@ def list_tests(request: Request, user=Depends(current_user)):
 async def upload(
     request: Request,
     filename: str = Query(default="시험 영상", min_length=1, max_length=200),
+    detection_threshold: float | None = Query(default=None, ge=0.1, le=0.99, allow_inf_nan=False),
+    min_face_size: int = Query(default=DEFAULT_MIN_FACE_SIZE, ge=8, le=512),
     user=Depends(current_user),
 ):
     settings = request.app.state.settings
@@ -78,7 +81,13 @@ async def upload(
                 worker.request,
                 "POST",
                 "/internal/face-tests",
-                json={"job_id": job_id, "owner_id": user.id, "filename": filename},
+                json={
+                    "job_id": job_id,
+                    "owner_id": user.id,
+                    "filename": filename,
+                    "detection_threshold": detection_threshold,
+                    "min_face_size": min_face_size,
+                },
             )
             succeeded = True
             return JSONResponse(response.json(), status_code=202)

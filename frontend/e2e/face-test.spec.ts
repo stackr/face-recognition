@@ -1,7 +1,7 @@
 import {expect, test} from '@playwright/test';
 import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 
-test('실제 CUDA 전체 프레임 분석·인물별 묶음·복구·빈 영상·분석 중 전체 삭제', async ({page, request}) => {
+test('실제 CUDA 검출 설정·전체 프레임 분석·묶음·복구·빈 영상·분석 중 전체 삭제', async ({page, request}) => {
   test.setTimeout(180000);
   const accountFile = process.env['FACE_TEST_E2E_ACCOUNT'];
   if (!accountFile) throw new Error('Run scripts/check_face_test_browser.py to use an isolated account.');
@@ -24,17 +24,37 @@ test('실제 CUDA 전체 프레임 분석·인물별 묶음·복구·빈 영상�
   const initial = await (await page.request.get('/api/face-tests')).json();
   expect(initial.items).toEqual([]);
   expect(initial.can_start).toBe(true);
+  const threshold = page.getByLabel('검출 기준', {exact:true});
+  const minimum = page.getByLabel('최소 얼굴 크기 (px)', {exact:true});
+  const analyze = page.getByRole('button', {name:'영상 분석', exact:true});
+  await expect(threshold).toHaveValue(String(initial.defaults.detection_threshold));
+  await expect(minimum).toHaveValue(String(initial.defaults.min_face_size));
+  expect(await threshold.evaluate(input => !!(input.compareDocumentPosition(document.querySelector('#face-test-video')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+  expect(await minimum.evaluate(input => !!(input.compareDocumentPosition(document.querySelector('#face-test-video')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
+  await expect(page.locator('.live-search-layout')).toHaveCount(0);
   await page.getByLabel('분석할 영상 파일', {exact:true}).setInputFiles(account.videos.faces);
+  for (const invalid of ['', '0.09', '1']) {
+    await threshold.fill(invalid);
+    await expect(analyze).toBeDisabled();
+  }
+  await threshold.fill('0.5');
+  for (const invalid of ['', '7', '513', '32.5']) {
+    await minimum.fill(invalid);
+    await expect(analyze).toBeDisabled();
+  }
+  await minimum.fill('32');
   await expect(page.getByRole('button', {name:'영상 분석', exact:true})).toBeEnabled();
   const created = page.waitForResponse(response => response.url().includes('/api/face-tests') && response.request().method() === 'POST');
   await page.getByRole('button', {name:'영상 분석', exact:true}).click();
   expect((await created).status()).toBe(202);
-  let job: {job_id:string; state:string; actual_device:string; processed_frames:number; total_frames:number; detections:number; groups:{group_id:number; occurrences:number; embedding_ready:boolean}[]};
+  let job: {job_id:string; state:string; actual_device:string; processed_frames:number; total_frames:number; detections:number; detection_threshold:number; min_face_size:number; groups:{group_id:number; occurrences:number; embedding_ready:boolean}[]};
   await expect.poll(async () => {
     job = (await (await page.request.get('/api/face-tests')).json()).items[0];
     return job?.state;
   }, {timeout:90000, intervals:[500,1000,1500]}).toBe('completed');
   expect(job!.actual_device).toBe('cuda');
+  expect(job!.detection_threshold).toBe(0.5);
+  expect(job!.min_face_size).toBe(32);
   expect(job!.processed_frames).toBe(40);
   expect(job!.total_frames).toBe(40);
   expect(job!.groups).toHaveLength(2);
@@ -42,6 +62,9 @@ test('실제 CUDA 전체 프레임 분석·인물별 묶음·복구·빈 영상�
   expect(job!.groups.every(group => group.embedding_ready && group.occurrences === 40)).toBe(true);
   await expect(page.locator('.face-test-card')).toHaveCount(2);
   await expect(page.locator('.face-test-progress')).toContainText('분석 완료');
+  await expect(page.locator('.face-test-applied-settings')).toHaveText('적용한 검출 기준 0.50 · 최소 얼굴 크기 32 px');
+  await minimum.fill('512');
+  await expect(page.locator('.face-test-applied-settings')).toContainText('32 px');
   await expect.poll(() => page.locator('.face-test-card img').evaluateAll(images => images.every(image => (image as HTMLImageElement).naturalWidth > 0))).toBe(true);
   const imageUrl = `/api/face-tests/${job!.job_id}/groups/${job!.groups[0].group_id}/image`;
   expect((await request.get(imageUrl)).status()).toBe(401);
@@ -51,11 +74,46 @@ test('실제 CUDA 전체 프레임 분석·인물별 묶음·복구·빈 영상�
   await page.screenshot({path:'../data/screenshots/face-test-desktop.png'});
   await page.reload();
   await expect(page.locator('.face-test-card')).toHaveCount(2);
+  await expect(threshold).toHaveValue('0.5');
+  await expect(minimum).toHaveValue('32');
   await page.setViewportSize({width:390, height:844});
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await page.screenshot({path:'../data/screenshots/face-test-mobile.png', fullPage:true});
   await page.setViewportSize({width:1600, height:1000});
 
+  // A stricter confidence cutoff excludes the lower-confidence face in this public fixture.
+  await threshold.fill('0.8');
+  await page.getByLabel('분석할 영상 파일', {exact:true}).setInputFiles(account.videos.faces);
+  await analyze.click();
+  await expect.poll(async () => {
+    const latest = (await (await page.request.get('/api/face-tests')).json()).items[0];
+    return latest.job_id !== job!.job_id && latest.state === 'completed' && latest.processed_frames === 40
+      && latest.detections === 40 && latest.groups.length === 1 && latest.detection_threshold === 0.8
+      && latest.min_face_size === 32;
+  }, {timeout:90000}).toBe(true);
+  await expect(page.locator('.face-test-applied-settings')).toContainText('0.80');
+  const original = await (await page.request.get(`/api/face-tests/${job!.job_id}`)).json();
+  expect(original.detection_threshold).toBe(0.5);
+  expect(original.min_face_size).toBe(32);
+  expect(original.groups).toHaveLength(2);
+
+  // The same real faces are excluded when their original-frame size is below the setting.
+  await minimum.fill('512');
+  await page.getByLabel('분석할 영상 파일', {exact:true}).setInputFiles(account.videos.faces);
+  await analyze.click();
+  await expect.poll(async () => {
+    const latest = (await (await page.request.get('/api/face-tests')).json()).items[0];
+    return latest.job_id !== job!.job_id && latest.state === 'completed' && latest.processed_frames === 40
+      && latest.detections === 0 && latest.groups.length === 0 && latest.min_face_size === 512;
+  }, {timeout:90000}).toBe(true);
+  await expect(page.getByText('이 영상에서 검출된 얼굴이 없습니다.', {exact:true})).toBeVisible();
+  await expect(page.locator('.face-test-applied-settings')).toContainText('512 px');
+  await minimum.fill('32');
+
+  await page.reload();
+  await expect(threshold).toHaveValue('0.8');
+  await expect(minimum).toHaveValue('512');
+  await minimum.fill('32');
   await expect(page.getByRole('button', {name:'영상 분석', exact:true})).toBeDisabled();
   await page.getByLabel('분석할 영상 파일', {exact:true}).setInputFiles(account.videos.blank);
   await page.getByRole('button', {name:'영상 분석', exact:true}).click();
@@ -83,6 +141,9 @@ test('실제 CUDA 전체 프레임 분석·인물별 묶음·복구·빈 영상�
   expect(errors).toEqual([]);
   mkdirSync('../data/reports', {recursive:true});
   writeFileSync('../data/reports/face-test-browser.json', JSON.stringify({status:'passed', actual_device:job!.actual_device,
+    detection_threshold:0.5, min_face_size:32, invalid_settings_rejected:true, settings_restored_on_reload:true,
+    stricter_detection_threshold:0.8, stricter_threshold_detections:40, stricter_threshold_person_groups:1,
+    stricter_min_size:512, stricter_min_size_detections:0, per_job_settings_preserved:true,
     processed_frames:40, detections:80, person_groups:2, repeated_face_dedup:true, restored_on_reload:true,
     empty_video_frames:20, deletion_during_analysis:true, anonymous_image_rejected:true, mobile_layout:true}, null, 2)+'\n', {mode:0o600});
   await page.request.post('/api/auth/logout', {headers});

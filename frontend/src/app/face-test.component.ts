@@ -2,6 +2,7 @@ import {CommonModule} from '@angular/common';
 import {HttpClient, HttpErrorResponse, HttpEventType} from '@angular/common/http';
 import {Component, DestroyRef, ElementRef, EventEmitter, Input, OnChanges, OnDestroy, Output, ViewChild, computed, inject, signal} from '@angular/core';
 import {takeUntilDestroyed} from '@angular/core/rxjs-interop';
+import {FormsModule} from '@angular/forms';
 import {timeout} from 'rxjs';
 
 interface FaceGroup {
@@ -12,13 +13,15 @@ interface FaceJob {
   job_id: string; filename: string; state: string; error_code: string | null;
   processed_frames: number; total_frames: number | null; detections: number;
   progress_percent: number | null; threshold: number; actual_device: string; groups: FaceGroup[];
+  detection_threshold?: number; min_face_size?: number;
 }
 interface FaceTests {
   items: FaceJob[]; can_start: boolean;
   limits: {upload_max_mb: number; retention_hours: number; max_duration_seconds: number};
+  defaults: {detection_threshold: number; min_face_size: number};
 }
 
-@Component({selector:'app-face-test', standalone:true, imports:[CommonModule], templateUrl:'./face-test.component.html'})
+@Component({selector:'app-face-test', standalone:true, imports:[CommonModule, FormsModule], templateUrl:'./face-test.component.html'})
 export class FaceTestComponent implements OnChanges, OnDestroy {
   private http = inject(HttpClient);
   private destroyRef = inject(DestroyRef);
@@ -37,6 +40,9 @@ export class FaceTestComponent implements OnChanges, OnDestroy {
   loading = signal(false);
   error = signal('');
   notice = signal('');
+  detectionThreshold: number | null = 0.5;
+  minFaceSize: number | null = 8;
+  private settingsInitialized = false;
   private version = 0;
   private poll = window.setInterval(() => {
     if (this.result()?.items.some(job => this.active(job)) || this.result()?.can_start === false) this.load(false);
@@ -46,6 +52,12 @@ export class FaceTestComponent implements OnChanges, OnDestroy {
   ngOnDestroy() {window.clearInterval(this.poll);}
   hasActiveJob() {return this.result()?.items.some(job => this.active(job)) ?? false;}
   active(job: FaceJob) {return job.state === 'queued' || job.state === 'running';}
+  validSettings() {
+    return typeof this.detectionThreshold === 'number' && Number.isFinite(this.detectionThreshold)
+      && this.detectionThreshold >= 0.1 && this.detectionThreshold <= 0.99
+      && typeof this.minFaceSize === 'number' && Number.isInteger(this.minFaceSize)
+      && this.minFaceSize >= 8 && this.minFaceSize <= 512;
+  }
   selectVideo(event: Event) {
     this.error.set(''); this.notice.set('');
     const input = event.target as HTMLInputElement;
@@ -67,19 +79,24 @@ export class FaceTestComponent implements OnChanges, OnDestroy {
       next: result => {
         if (version !== this.version) return;
         this.result.set(result); this.loading.set(false);
+        if (!this.settingsInitialized) {
+          this.detectionThreshold = result.items[0]?.detection_threshold ?? result.defaults.detection_threshold;
+          this.minFaceSize = result.items[0]?.min_face_size ?? result.defaults.min_face_size;
+          this.settingsInitialized = true;
+        }
         if (!result.items.some(job => job.job_id === this.selectedId())) this.selectedId.set(result.items[0]?.job_id ?? '');
       }, error: error => {if (version === this.version) {this.loading.set(false); this.failed(error);}}
     });
   }
   analyze() {
     const file = this.selectedFile();
-    if (!file || !this.result()?.can_start || this.uploading() || this.deleting()) return;
+    if (!file || !this.validSettings() || !this.result()?.can_start || this.uploading() || this.deleting()) return;
     ++this.version; this.loading.set(false);
     this.uploading.set(true); this.uploadPercent.set(null); this.savingChange.emit(true);
     this.error.set(''); this.notice.set('');
     this.http.post<FaceJob>('/api/face-tests', file, {
       headers:{...this.requestHeaders, 'Content-Type':file.type.startsWith('video/') ? file.type : 'application/octet-stream'},
-      params:{filename:file.name.slice(0,200)}, observe:'events', reportProgress:true
+      params:{filename:file.name.slice(0,200), detection_threshold:this.detectionThreshold!, min_face_size:this.minFaceSize!}, observe:'events', reportProgress:true
     }).pipe(timeout(120000), takeUntilDestroyed(this.destroyRef)).subscribe({
       next: event => {
         if (event.type === HttpEventType.UploadProgress && event.total) this.uploadPercent.set(Math.round(event.loaded / event.total * 100));
@@ -121,7 +138,8 @@ export class FaceTestComponent implements OnChanges, OnDestroy {
     if (error.status === 401) this.sessionExpired.emit();
     this.error.set(error.status === 413 ? '영상 파일이 업로드 용량 제한을 초과했습니다.'
       : error.status === 429 ? '다른 영상이 분석 중이거나 저장 제한에 도달했습니다. 완료를 기다리거나 목록을 삭제해 주세요.'
-      : error.status === 422 || error.status === 415 ? '지원되는 영상 파일을 선택해 주세요.'
+      : error.status === 422 ? '영상 파일과 검출 기준·최소 얼굴 크기를 확인해 주세요.'
+      : error.status === 415 ? '지원되는 영상 파일을 선택해 주세요.'
       : '요청을 처리하지 못했습니다. 서버 연결을 확인한 후 새로고침해 주세요.');
   }
 }
