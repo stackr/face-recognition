@@ -6,6 +6,7 @@ markers = ["integration: requires explicitly configured MariaDB/Qdrant services"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+extend-exclude = ["backend/app/worker/vendor/osnet.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

@@ -170,6 +170,8 @@
                     @if (track.face?.face_size) {<small>{{ track.face!.face_size!.join(' × ') }} px · 밝기 {{ track.face?.brightness | number:'1.0-0' }}</small>}
                     @if (track.face?.yaw !== null && track.face?.yaw !== undefined) {<small>yaw {{ track.face?.yaw | number:'1.0-0' }}° · pitch {{ track.face?.pitch | number:'1.0-0' }}° · roll {{ track.face?.roll | number:'1.0-0' }}°</small>}
                     @for (match of track.face?.matches || []; track match.person_id) {<div class="candidate-label">유사도 후보: {{ match.name }} · {{ match.similarity | number:'1.3-3' }}</div>}
+                    @if (track.reid?.embedding_ready) {<small>외형 특징 준비 · 인물 확인 전</small>}
+                    @if (track.reid?.status === 'unavailable') {<small>외형 분석 일시 사용 불가</small>}
                     @if (faceReasons(track.face)) {<small class="face-reasons">{{ faceReasons(track.face) }}</small>}
                   </div>
                 </article>

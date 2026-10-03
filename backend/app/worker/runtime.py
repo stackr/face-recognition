@@ -41,6 +41,7 @@ class CameraRun:
         self.stream_session_id = uuid.uuid4().hex
         self.tracker = None
         self.faces = None
+        self.reid = None
         self.latest = None
         self.jpeg = None
         self.result = None
@@ -62,6 +63,8 @@ class CameraRun:
         self.face_ms = deque(maxlen=600)
         self.face_process_ms = deque(maxlen=600)
         self.face_search_ms = deque(maxlen=600)
+        self.reid_counts = Counter()
+        self.reid_ms = deque(maxlen=600)
         self.max_people = 0
         self.thread = threading.Thread(
             target=self.capture, daemon=True, name=f"capture-{camera_id}"
@@ -94,7 +97,7 @@ class CameraRun:
             self.stream_session_id = uuid.uuid4().hex
             self.session_captured = self.session_processed = 0
             self.connected_at = None
-        self.latest = self.jpeg = self.result = self.tracker = self.faces = None
+        self.latest = self.jpeg = self.result = self.tracker = self.faces = self.reid = None
         self.next_due = 0
 
     def queue_frame(self, image):
@@ -299,6 +302,9 @@ class CameraRun:
                 "face_analysis_fps": round(self.face_counts["analysis_frames"] / elapsed, 2),
                 "face_roi_fps": round(self.face_counts["roi_attempts"] / elapsed, 2),
                 "face_counts": dict(self.face_counts),
+                "reid_counts": dict(self.reid_counts),
+                "reid_cache_tracks": self.reid.size() if self.reid else 0,
+                "reid_mean_ms": round(float(np.mean(self.reid_ms)), 2) if self.reid_ms else None,
                 "face_cache_tracks": self.faces.size() if self.faces else 0,
                 "face_mean_ms": round(float(np.mean(self.face_ms)), 2) if self.face_ms else None,
                 "face_process_mean_ms": round(float(np.mean(self.face_process_ms)), 2)
@@ -337,6 +343,8 @@ class WorkerRuntime:
         self.face_analyzer = face_analyzer
         self.gallery = gallery
         self.events = events
+        self.reidentifier = None
+        self.reid_status = {"status": "disabled"}
         self.diagnostics = None
         self.clips = None
         self.sampling_revision = sampling_revision
@@ -489,7 +497,7 @@ class WorkerRuntime:
                         if run.state == "draining" and run.latest is None:
                             run.state = "ended"
                             run.ended_mono = time.monotonic()
-                            run.jpeg = run.result = run.tracker = run.faces = None
+                            run.jpeg = run.result = run.tracker = run.faces = run.reid = None
                             continue
                         if run.latest is None or time.monotonic() < run.next_due:
                             continue
@@ -568,6 +576,24 @@ class WorkerRuntime:
                     )
             face_search_ms = (time.monotonic() - search_start) * 1000
             face_ms = (time.monotonic() - face_start) * 1000
+            reid_counts = Counter()
+            reid_start = time.monotonic()
+            if self.reidentifier is not None:
+                from app.worker.reid import BodyTrackCache
+
+                with run.lock:
+                    if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
+                        return
+                    if run.reid is None:
+                        run.reid = BodyTrackCache(self.settings)
+                    reid = run.reid
+                try:
+                    reid_counts = reid.process(self.reidentifier, frame, tracks, live_ids)
+                except Exception:
+                    reid_counts["failures"] += 1
+                    for track in tracks:
+                        track["reid"] = {"status": "unavailable", "embedding_ready": False}
+            reid_ms = (time.monotonic() - reid_start) * 1000
             annotated = frame.image.copy()
             for track in tracks:
                 x1, y1, x2, y2 = map(int, track["bbox"])
@@ -639,6 +665,9 @@ class WorkerRuntime:
                 run.processed += 1
                 run.session_processed += 1
                 run.face_counts.update(face_counts)
+                run.reid_counts.update(reid_counts)
+                if reid_counts["roi_attempts"]:
+                    run.reid_ms.append(reid_ms)
                 if face_counts["analysis_frames"]:
                     run.face_ms.append(face_ms)
                     run.face_process_ms.append(face_process_ms)
@@ -684,6 +713,7 @@ class WorkerRuntime:
             except TimeoutError:
                 pass
         self.scheduler.join(timeout=10)
+        self.reidentifier = None
         while not self.commands.empty():
             future, _ = self.commands.get_nowait()
             future.cancel()

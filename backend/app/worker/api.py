@@ -32,7 +32,13 @@ def private_video(source, settings):
 
 
 def create_worker(
-    settings=None, detector=None, *, face_analyzer=None, enable_faces=True, enable_gallery=True
+    settings=None,
+    detector=None,
+    *,
+    face_analyzer=None,
+    reidentifier=None,
+    enable_faces=True,
+    enable_gallery=True,
 ):
     settings = settings or Settings()
 
@@ -75,6 +81,21 @@ def create_worker(
         app.state.runtime = WorkerRuntime(
             settings, active_detector, active_faces, gallery, events, revision
         )
+        if settings.reid_enabled:
+            try:
+                from app.worker.reid import OSNetReIdentifier
+
+                app.state.runtime.reidentifier = reidentifier or OSNetReIdentifier(settings)
+                app.state.runtime.reid_status = app.state.runtime.reidentifier.info
+            except Exception as exc:
+                app.state.runtime.reid_status = {
+                    "status": "unavailable",
+                    "error_type": type(exc).__name__,
+                    "error_code": "reid_model_not_ready",
+                }
+                logging.getLogger("cctv.worker").warning(
+                    "Optional Re-ID startup unavailable; type=%s", type(exc).__name__
+                )
         if events and settings.clip_enabled:
             from app.worker.clips import ClipManager
 
@@ -121,6 +142,7 @@ def create_worker(
             "face_analysis": runtime.face_analyzer.info
             if runtime.face_analyzer
             else {"status": "disabled"},
+            "person_reid": runtime.reid_status,
             "resources": runtime.detector.resources(),
             "cameras": states,
             "events": runtime.events.status() if runtime.events else {"status": "disabled"},

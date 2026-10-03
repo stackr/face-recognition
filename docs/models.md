@@ -97,3 +97,7 @@ MediaMTX **v1.21.1 Linux amd64** 공식 바이너리를 localhost RTSP 장애/�
 - 실행 바이너리 SHA256: `2b45b2999f22c8a1ecd376ce407b6337b68466fdeac54a8fdc448a79f818474f`
 - 사용 조건: 배포 archive에 포함된 MIT License, Copyright (c) 2019 aler9. 고지 원문을 `data/tools/mediamtx/LICENSE`에 함께 보관한다. 복제/배포 시 MIT의 저작권·허가 고지 조건을 유지한다. [공식 LICENSE](https://github.com/bluenviron/mediamtx/blob/v1.21.1/LICENSE)
 - `prepare_phase5.py`는 archive checksum을 검증하고 파일별 hash/source/version을 `data/tools/mediamtx/manifest.json`에 기록한다. fixture는 실행 전 binary SHA256을 다시 확인한다.
+
+## Phase 11 OSNet 몸 외형 특징
+
+작성자 [kaiyangzhou/osnet](https://huggingface.co/kaiyangzhou/osnet)의 OSNet x0.25 MSMT17 combineall 학습 가중치를 사용한다. checkpoint SHA256은 cf55163d78fc44c62c82f85ab62d39f10438679b5abe8c698ae08cfa84aa6e18, 모델 버전은 osnet-x0.25-msmt17-cf55163d78fc다. architecture 원본은 deep-person-reid commit f8cd150fdf77e8d9e1ed143b7f308c2c609ded50이며 MIT 원문을 third_party/osnet/LICENSE에 보존했다. 작성자 model card도 MIT로 표시한다. 가중치는 Git에 포함하지 않고 준비 script에서 고정 revision/SHA를 검사한다. 안전한 weights_only loader로 feature layer 전체를 로드하고 classifier만 제외한다. 얼굴 모델과 별개의 몸 특징으로 사용하며 프로젝트는 비상업 시험 목적을 유지한다. 실제 CUDA 검증·선택 활성화·범위는 [Phase 11 결과](phase11-report.md)를 참고한다.

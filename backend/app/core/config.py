@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     log_dir: Path = ROOT / "logs"
     worker_url: str = "http://127.0.0.1:8001"
     yolo_model_path: Path = ROOT / "data/models/yolo11n.pt"
+    reid_enabled: bool = False
+    reid_model_path: Path = ROOT / "data/models/osnet_x0_25_msmt17.pth"
+    reid_interval_seconds: float = Field(default=2, ge=0.5, le=10)
+    reid_rois_per_frame: int = Field(default=2, ge=1, le=4)
+    reid_tracks_per_camera: int = Field(default=100, ge=1, le=200)
     face_model_dir: Path = ROOT / "data/models/buffalo_l"
     face_analysis_interval: float = Field(default=0.5, ge=0.2, le=10)
     face_rois_per_frame: int = Field(default=4, ge=1, le=16)
@@ -145,6 +150,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "yolo_model_path",
+        "reid_model_path",
         "face_model_dir",
         "reference_dir",
         "event_dir",

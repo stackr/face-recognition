@@ -29,7 +29,7 @@ interface FaceStatus {
   sample_count?: number;
   comparison?: {outcome: string; top_similarity: number | null; threshold: number};
 }
-interface AnalysisTrack {track_id: number; confidence: number; face?: FaceStatus;}
+interface AnalysisTrack {track_id: number; confidence: number; face?: FaceStatus; reid?: {status: string; embedding_ready: boolean; identity_assignment?: boolean};}
 interface AnalysisStatus {
   camera_id: number; state: string; error_code?: string; source_type?: string; stream_session_id?: string;
   detection_fps?: number; capture_fps?: number; processed_frames?: number; dropped_frames?: number;
