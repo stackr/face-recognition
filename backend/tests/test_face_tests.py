@@ -35,6 +35,67 @@ def extracted(index, quality=10, box=(10, 10, 50, 50), content=b"jpeg"):
     )
 
 
+def angled_face(degrees, quality=10, content=b"jpeg"):
+    face = extracted(0, quality=quality, content=content)
+    radians = np.deg2rad(degrees)
+    face.embedding[:2] = [np.cos(radians), np.sin(radians)]
+    return face
+
+
+@pytest.mark.parametrize("threshold, expected", [(0.8, 1), (0.9, 2)])
+def test_final_prototypes_merge_split_groups_and_preserve_best_image_and_counts(
+    threshold, expected
+):
+    groups = FaceGroups(threshold, 10)
+    for frame, angle in enumerate([0, 50, 25, 38], 1):
+        groups.add_frame(
+            [angled_face(angle, quality=frame, content=b"best" if frame == 4 else b"jpeg")],
+            frame,
+            frame - 1,
+        )
+    before = groups.metadata()
+    assert len(before) == 2
+    merged, sources = groups.merge_similar(threading.Event())
+    assert len(merged) == expected
+    assert sum(g.metadata["occurrences"] for g in merged) == 4
+    assert groups.metadata() == before
+    if expected == 1:
+        result = merged[0].metadata
+        assert sources == {1: 2}
+        assert result["first_seen_seconds"] == 0 and result["last_seen_seconds"] == 3
+        assert result["best_frame"] == result["last_frame"] == 4
+        assert result["best_seen_seconds"] == 3 and result["embedding_ready"]
+        assert len(merged[0].exemplars) <= 8
+
+
+def test_remerge_keeps_simultaneous_identical_features_apart_and_propagates_conflicts():
+    groups = FaceGroups(1, 10)
+    groups.add_frame([angled_face(0), angled_face(0)], 1, 0)
+    groups.add_frame([angled_face(20)], 2, 1)
+    assert len(groups.groups) == 3
+    groups.threshold = 0.8
+    merged, sources = groups.merge_similar(threading.Event())
+    assert [g.metadata["group_id"] for g in merged] == [1, 2]
+    assert [g.metadata["occurrences"] for g in merged] == [2, 1]
+    assert sources == {1: 1, 2: 2}
+
+
+def test_remerge_rejects_similarity_chains_and_unavailable_features():
+    groups = FaceGroups(1, 10)
+    for frame, angle in enumerate([0, 20, 40], 1):
+        groups.add_frame([angled_face(angle)], frame, frame)
+    groups.threshold = 0.8
+    merged, _ = groups.merge_similar(threading.Event())
+    assert len(merged) == 2
+    unresolved = FaceGroups(-1, 10)
+    unresolved.add_frame([extracted(None), extracted(None)], 1, 0)
+    assert len(unresolved.merge_similar(threading.Event())[0]) == 2
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(VideoTestError, match="cancelled"):
+        groups.merge_similar(cancel)
+
+
 def test_grouping_repeats_keeps_best_and_separates_simultaneous_faces():
     groups = FaceGroups(0.7, 10)
     assert groups.add_frame([extracted(0), extracted(1)], 1, 0) == [(1, b"jpeg"), (2, b"jpeg")]
@@ -194,7 +255,7 @@ def await_job(manager, job_id, owner=1):
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
         result = manager.get(job_id, owner)
-        if result["state"] not in {"queued", "running"} and manager.active is None:
+        if result["state"] not in {"queued", "running", "merging"} and manager.active is None:
             return result
         time.sleep(0.01)
     pytest.fail("Video test did not finish")
@@ -206,7 +267,9 @@ def upload_file(manager, content):
     return job_id
 
 
-@pytest.mark.parametrize("options", [{}, {"detection_threshold": 0.85, "min_face_size": 48}])
+@pytest.mark.parametrize(
+    "options", [{}, {"detection_threshold": 0.85, "min_face_size": 48, "match_threshold": 0.61}]
+)
 def test_job_analyzes_every_frame_without_sampling_and_preserves_empty_result(app_context, options):
     settings = app_context[2]
     analyzer = EmptyFaces()
@@ -221,6 +284,7 @@ def test_job_analyzes_every_frame_without_sampling_and_preserves_empty_result(ap
     try:
         job_id = upload_file(manager, video.read_bytes())
         original_threshold = settings.face_detection_threshold
+        original_match = runtime.settings.face_match_threshold
         manager.start(job_id, 1, "blank.mp4", **options)
         result = await_job(manager, job_id)
         assert result["state"] == "completed"
@@ -231,6 +295,9 @@ def test_job_analyzes_every_frame_without_sampling_and_preserves_empty_result(ap
         assert result["min_face_size"] == options.get("min_face_size", 8)
         assert analyzer.thresholds == [expected_threshold] * 20
         assert settings.face_detection_threshold == original_threshold
+        assert result["threshold"] == options.get("match_threshold", original_match)
+        assert runtime.settings.face_match_threshold == original_match
+        assert result["groups_before_merge"] == result["merged_group_count"] == 0
         saved = json.loads((manager.root / job_id / "job.json").read_text())
         assert saved["detection_threshold"] == expected_threshold
         assert saved["min_face_size"] == result["min_face_size"]
@@ -241,6 +308,86 @@ def test_job_analyzes_every_frame_without_sampling_and_preserves_empty_result(ap
         assert manager.list(2) == []
         assert manager.delete_all(2) == {"deleted_jobs": 0}
         assert manager.delete_all(1) == {"deleted_jobs": 1}
+        assert not (manager.root / job_id).exists()
+    finally:
+        manager.close()
+
+
+def test_manager_publishes_merged_counts_best_thumbnail_and_removes_redundant_file(
+    app_context, monkeypatch
+):
+    settings = app_context[2]
+    video = settings.video_dir / "split.mp4"
+    write_video(video, seconds=1)
+    analyzer = EmptyFaces()
+    runtime = SimpleNamespace(settings=settings, face_analyzer=analyzer)
+    manager = FaceTestManager(settings, runtime)
+    calls = 0
+
+    def infer(image, cancellation, options):
+        nonlocal calls
+        calls += 1
+        return [
+            angled_face(
+                [0, 50, 25, 38][min(calls - 1, 3)], quality=calls, content=f"frame-{calls}".encode()
+            )
+        ]
+
+    monkeypatch.setattr(manager, "_infer", infer)
+    try:
+        job_id = upload_file(manager, video.read_bytes())
+        manager.start(job_id, 1, "split.mp4", match_threshold=0.8)
+        result = await_job(manager, job_id)
+        assert result["state"] == "completed"
+        assert result["processed_frames"] == result["detections"] == 20
+        assert result["groups_before_merge"] == 2 and result["merged_group_count"] == 1
+        assert len(result["groups"]) == 1 and result["groups"][0]["occurrences"] == 20
+        assert result["groups"][0]["best_frame"] == 20
+        assert manager.image(job_id, 1, 1) == b"frame-20"
+        assert len(list((manager.root / job_id).glob("*.jpg"))) == 1
+        with pytest.raises(KeyError):
+            manager.image(job_id, 2, 1)
+        saved = json.loads((manager.root / job_id / "job.json").read_text())
+        assert saved["groups"] == result["groups"]
+        assert "centroid" not in json.dumps(saved) and "exemplars" not in json.dumps(saved)
+    finally:
+        manager.close()
+    recovered = FaceTestManager(settings, SimpleNamespace())
+    try:
+        assert recovered.get(job_id, 1)["merged_group_count"] == 1
+        assert recovered.image(job_id, 1, 1) == b"frame-20"
+    finally:
+        recovered.close()
+
+
+def test_delete_interrupts_final_merging_without_recreating_result(app_context, monkeypatch):
+    settings = app_context[2]
+    video = settings.video_dir / "merge-cancel.mp4"
+    write_video(video, seconds=1)
+    analyzer = EmptyFaces()
+    runtime = SimpleNamespace(
+        settings=settings,
+        face_analyzer=analyzer,
+        submit_face_task=lambda task: submit_immediate(analyzer, task),
+    )
+    entered = threading.Event()
+    original_merge = FaceGroups.merge_similar
+
+    def delayed_merge(self, cancel):
+        entered.set()
+        assert cancel.wait(5)
+        return original_merge(self, cancel)
+
+    monkeypatch.setattr(FaceGroups, "merge_similar", delayed_merge)
+    manager = FaceTestManager(settings, runtime)
+    try:
+        job_id = upload_file(manager, video.read_bytes())
+        manager.start(job_id, 1, "merge-cancel.mp4")
+        assert entered.wait(3)
+        assert manager.get(job_id, 1)["state"] == "merging"
+        assert manager.delete_all(2) == {"deleted_jobs": 0}
+        assert manager.delete_all(1) == {"deleted_jobs": 1}
+        assert manager.active is None and manager.list(1) == []
         assert not (manager.root / job_id).exists()
     finally:
         manager.close()
@@ -261,12 +408,15 @@ def test_invalid_video_fails_without_claiming_full_analysis(app_context):
         manager.close()
 
 
-def test_restart_marks_interrupted_job_and_retention_deletes_owned_data(app_context):
+@pytest.mark.parametrize("interrupted_state", ["running", "merging"])
+def test_restart_marks_interrupted_job_and_retention_deletes_owned_data(
+    app_context, interrupted_state
+):
     settings = app_context[2]
     job_id, expired_id = str(uuid.uuid4()), str(uuid.uuid4())
     root = private_directory(settings.face_test_dir)
     for key, state, expiry in [
-        (job_id, "running", datetime.now(UTC) + timedelta(hours=1)),
+        (job_id, interrupted_state, datetime.now(UTC) + timedelta(hours=1)),
         (expired_id, "completed", datetime.now(UTC) - timedelta(hours=1)),
     ]:
         directory = private_directory(root / key)
@@ -335,6 +485,7 @@ def test_authenticated_api_upload_limits_csrf_and_owner_boundary(app_context, ad
             payload = json.loads(request.content)
             assert payload["owner_id"] == 1 and payload["filename"] == "test.mp4"
             assert payload["detection_threshold"] == 0.83 and payload["min_face_size"] == 48
+            assert payload["match_threshold"] == 0.61
             path = settings.face_test_dir / ".incoming" / f"{payload['job_id']}.video"
             assert path.read_bytes() == b"video"
             assert path.stat().st_mode & 0o777 == 0o600
@@ -354,7 +505,7 @@ def test_authenticated_api_upload_limits_csrf_and_owner_boundary(app_context, ad
         client.post("/api/face-tests", content=b"video", headers=admin_headers).status_code == 415
     )
     response = client.post(
-        "/api/face-tests?filename=test.mp4&detection_threshold=0.83&min_face_size=48",
+        "/api/face-tests?filename=test.mp4&detection_threshold=0.83&min_face_size=48&match_threshold=0.61",
         content=b"video",
         headers={**admin_headers, "Content-Type": "video/mp4"},
     )
@@ -388,6 +539,11 @@ def test_authenticated_api_upload_limits_csrf_and_owner_boundary(app_context, ad
         "min_face_size=513",
         "min_face_size=32.5",
         "min_face_size=",
+        "match_threshold=-1.1",
+        "match_threshold=1.1",
+        "match_threshold=nan",
+        "match_threshold=inf",
+        "match_threshold=",
     ],
 )
 def test_invalid_detection_settings_rejected_before_storing_upload(
@@ -422,6 +578,7 @@ def test_worker_all_frame_tasks_use_shared_scheduler_and_require_service_auth(ap
         assert client.get("/internal/face-tests?owner_id=1").json()["defaults"] == {
             "detection_threshold": settings.face_detection_threshold,
             "min_face_size": 8,
+            "match_threshold": settings.face_match_threshold,
         }
         video = settings.video_dir / "scheduled.mp4"
         write_video(video, seconds=1)

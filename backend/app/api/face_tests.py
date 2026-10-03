@@ -29,6 +29,7 @@ async def upload(
     filename: str = Query(default="시험 영상", min_length=1, max_length=200),
     detection_threshold: float | None = Query(default=None, ge=0.1, le=0.99, allow_inf_nan=False),
     min_face_size: int = Query(default=DEFAULT_MIN_FACE_SIZE, ge=8, le=512),
+    match_threshold: float | None = Query(default=None, ge=-1, le=1, allow_inf_nan=False),
     user=Depends(current_user),
 ):
     settings = request.app.state.settings
@@ -87,6 +88,7 @@ async def upload(
                     "filename": filename,
                     "detection_threshold": detection_threshold,
                     "min_face_size": min_face_size,
+                    "match_threshold": match_threshold,
                 },
             )
             succeeded = True

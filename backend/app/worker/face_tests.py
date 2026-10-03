@@ -22,7 +22,7 @@ from app.core.face_test_data import (
 from app.schemas.face_tests import DEFAULT_MIN_FACE_SIZE, FaceTestOptions
 from app.worker.video_faces import FaceGroups, VideoTestError, analyze_frame
 
-ACTIVE = {"queued", "running"}
+ACTIVE = {"queued", "running", "merging"}
 
 
 def now():
@@ -112,6 +112,7 @@ class FaceTestManager:
         *,
         detection_threshold=None,
         min_face_size=DEFAULT_MIN_FACE_SIZE,
+        match_threshold=None,
     ):
         identifier(job_id)
         options = FaceTestOptions(
@@ -121,6 +122,11 @@ class FaceTestManager:
                 else detection_threshold
             ),
             min_face_size=min_face_size,
+            match_threshold=(
+                self.runtime.settings.face_match_threshold
+                if match_threshold is None
+                else match_threshold
+            ),
         )
         source = self.incoming / f"{job_id}.video"
         with self.mutation, self.lock:
@@ -155,8 +161,10 @@ class FaceTestManager:
                 "detections": 0,
                 "duration_seconds": None,
                 "progress_percent": 0,
-                "threshold": self.runtime.settings.face_match_threshold,
-                **options.model_dump(),
+                "threshold": options.match_threshold,
+                **options.model_dump(exclude={"match_threshold"}),
+                "groups_before_merge": None,
+                "merged_group_count": 0,
                 "actual_device": self.runtime.face_analyzer.info.get("actual_device", "unknown"),
                 "groups": [],
             }
@@ -284,6 +292,28 @@ class FaceTestManager:
                 raise VideoTestError("invalid_video")
             if expected and processed < expected:
                 raise VideoTestError("video_decode_incomplete")
+            before_merge = len(groups.groups)
+            self._save(
+                job_id,
+                state="merging",
+                progress_percent=99,
+                total_frames=processed,
+                processed_frames=processed,
+                detections=detections,
+                groups=groups.metadata(),
+                groups_before_merge=before_merge,
+            )
+            merged, sources = groups.merge_similar(cancellation)
+            # Source images stay available until all copies and metadata are saved.
+            for group_id, source_id in sources.items():
+                if cancellation.is_set() or self.cancel.is_set():
+                    raise VideoTestError("cancelled")
+                if group_id != source_id:
+                    write_private(
+                        directory / f"{group_id}.jpg", (directory / f"{source_id}.jpg").read_bytes()
+                    )
+            if cancellation.is_set() or self.cancel.is_set():
+                raise VideoTestError("cancelled")
             self._save(
                 job_id,
                 state="completed",
@@ -291,8 +321,19 @@ class FaceTestManager:
                 total_frames=processed,
                 processed_frames=processed,
                 detections=detections,
-                groups=groups.metadata(),
+                groups=[dict(group.metadata) for group in merged],
+                merged_group_count=before_merge - len(merged),
             )
+            # Remove only this job's redundant thumbnails after publishing the result.
+            for group in groups.groups:
+                group_id = group.metadata["group_id"]
+                if group_id not in sources:
+                    try:
+                        (directory / f"{group_id}.jpg").unlink(missing_ok=True)
+                    except OSError:
+                        logging.getLogger("cctv.face-tests").warning(
+                            "Merged image cleanup deferred"
+                        )
         except Exception as exc:
             code = exc.code if isinstance(exc, VideoTestError) else "analysis_failed"
             self._save(

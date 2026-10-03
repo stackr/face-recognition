@@ -174,6 +174,7 @@ def create_worker(
             "defaults": {
                 "detection_threshold": settings.face_detection_threshold,
                 "min_face_size": DEFAULT_MIN_FACE_SIZE,
+                "match_threshold": manager.runtime.settings.face_match_threshold,
             },
             "can_start": (
                 manager.active is None
@@ -198,6 +199,7 @@ def create_worker(
                 payload.filename,
                 detection_threshold=payload.detection_threshold,
                 min_face_size=payload.min_face_size,
+                match_threshold=payload.match_threshold,
             )
         except OverflowError:
             raise HTTPException(429, "Video test limit reached") from None

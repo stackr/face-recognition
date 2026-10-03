@@ -1,7 +1,7 @@
 """All-frame face extraction and ephemeral, per-video appearance clustering."""
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import cv2
 import numpy as np
@@ -151,6 +151,17 @@ class FaceGroup:
     exemplars: list[np.ndarray] = field(default_factory=list)
     last_box: np.ndarray | None = None
     best_quality: float = -1
+    cooccurs: int = 0
+
+
+def add_exemplar(group, embedding):
+    # Bounded diversity, not frequency, controls the cluster prototype.
+    if not group.exemplars or max(float(v @ embedding) for v in group.exemplars) < 0.98:
+        group.exemplars.append(embedding.copy())
+        if len(group.exemplars) > 8:
+            group.exemplars.pop(0)
+        mean = np.mean(group.exemplars, axis=0)
+        group.centroid = normalized_embedding(mean) if np.linalg.norm(mean) > 1e-8 else None
 
 
 class FaceGroups:
@@ -160,6 +171,7 @@ class FaceGroups:
 
     def add_frame(self, faces, frame_id, timestamp):
         updated = []
+        observed = []
         for face in faces:
             eligible = [g for g in self.groups if g.metadata["last_frame"] != frame_id]
             scores = [
@@ -200,23 +212,77 @@ class FaceGroups:
             group.metadata.update(last_frame=frame_id, last_seen_seconds=round(timestamp, 3))
             group.last_box = face.bbox.copy()
             if face.embedding is not None:
-                # Bounded diversity, not frequency, controls the cluster prototype.
-                if (
-                    not group.exemplars
-                    or max(float(v @ face.embedding) for v in group.exemplars) < 0.98
-                ):
-                    group.exemplars.append(face.embedding.copy())
-                    if len(group.exemplars) > 8:
-                        group.exemplars.pop(0)
-                    mean = np.mean(group.exemplars, axis=0)
-                    if np.linalg.norm(mean) > 1e-8:
-                        group.centroid = normalized_embedding(mean)
+                add_exemplar(group, face.embedding)
                 group.metadata["embedding_ready"] = True
             if face.quality > group.best_quality:
                 group.best_quality = face.quality
                 group.metadata.update(best_frame=frame_id, best_seen_seconds=round(timestamp, 3))
                 updated.append((group.metadata["group_id"], face.jpeg))
+            observed.append(group)
+        # A bounded bit mask records which groups ever appeared in the same frame.
+        mask = sum(1 << (g.metadata["group_id"] - 1) for g in observed)
+        for group in observed:
+            group.cooccurs |= mask ^ (1 << (group.metadata["group_id"] - 1))
         return updated
+
+    def merge_similar(self, cancel):
+        """Complete-link merging of final prototypes; never mutate published groups."""
+        groups = [
+            replace(g, metadata=dict(g.metadata), exemplars=list(g.exemplars)) for g in self.groups
+        ]
+        sources = [g.metadata["group_id"] for g in groups]
+        if cancel.is_set():
+            raise VideoTestError("cancelled")
+        if len(groups) < 2:
+            return groups, dict(zip(sources, sources, strict=True))
+        vectors = np.stack(
+            [g.centroid if g.centroid is not None else np.zeros(512, np.float32) for g in groups]
+        )
+        scores = np.clip(vectors @ vectors.T, -1, 1)
+        for i, group in enumerate(groups):
+            if group.centroid is None:
+                scores[i, :] = scores[:, i] = -np.inf
+            for j, other in enumerate(groups):
+                if group.cooccurs & (1 << (other.metadata["group_id"] - 1)):
+                    scores[i, j] = scores[j, i] = -np.inf
+        np.fill_diagonal(scores, -np.inf)
+        retained = np.ones(len(groups), dtype=bool)
+        while True:
+            if cancel.is_set():
+                raise VideoTestError("cancelled")
+            i, j = np.unravel_index(int(np.argmax(scores)), scores.shape)
+            if scores[i, j] < self.threshold:
+                break
+            target, other = groups[i], groups[j]
+            target.metadata["occurrences"] += other.metadata["occurrences"]
+            target.metadata["first_seen_seconds"] = min(
+                target.metadata["first_seen_seconds"], other.metadata["first_seen_seconds"]
+            )
+            target.metadata["last_seen_seconds"] = max(
+                target.metadata["last_seen_seconds"], other.metadata["last_seen_seconds"]
+            )
+            if other.metadata["last_frame"] > target.metadata["last_frame"]:
+                target.metadata["last_frame"] = other.metadata["last_frame"]
+                target.last_box = other.last_box
+            if other.best_quality > target.best_quality:
+                target.best_quality = other.best_quality
+                sources[i] = sources[j]
+                for key in ("best_frame", "best_seen_seconds"):
+                    target.metadata[key] = other.metadata[key]
+            for exemplar in other.exemplars:
+                add_exemplar(target, exemplar)
+            target.cooccurs |= other.cooccurs
+            # Every original prototype pair must pass. A-B-C similarity chains
+            # and any co-occurrence conflict therefore cannot collapse into one.
+            row = np.minimum(scores[i, :], scores[j, :])
+            scores[i, :] = scores[:, i] = row
+            scores[j, :] = scores[:, j] = -np.inf
+            scores[i, i] = -np.inf
+            retained[j] = False
+        return (
+            [g for i, g in enumerate(groups) if retained[i]],
+            {g.metadata["group_id"]: sources[i] for i, g in enumerate(groups) if retained[i]},
+        )
 
     def metadata(self):
         return [dict(group.metadata) for group in self.groups]
