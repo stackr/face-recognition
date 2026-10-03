@@ -3,7 +3,7 @@ import pytest
 from app.core.config import Settings
 from app.core.security import password_hasher
 from app.main import create_app
-from app.models import Base, GalleryState, User
+from app.models import Base, EventState, GalleryState, User
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from qdrant_client import QdrantClient
@@ -25,6 +25,7 @@ def app_context(tmp_path):
         gpu_report_path=tmp_path / "gpu.json",
         video_dir=tmp_path / "videos",
         reference_dir=tmp_path / "references",
+        event_dir=tmp_path / "events",
         allowed_origins=["http://localhost:4200"],
     )
     engine = create_engine(
@@ -41,6 +42,7 @@ def app_context(tmp_path):
     Base.metadata.create_all(engine)
     with Session(engine) as db:
         db.add(GalleryState(id=1, revision=1))
+        db.add(EventState(id=1, revision=0, last_event_id=0))
         hashed = password_hasher.hash(TEST_PASSWORD)
         db.add_all(
             [

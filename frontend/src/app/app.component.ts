@@ -4,6 +4,7 @@ import { Component, inject, signal, OnDestroy } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom, timeout } from 'rxjs';
 import { FaceCropperComponent } from './face-cropper.component';
+import { EventPanelComponent } from './event-panel.component';
 
 interface User { id: number; username: string; role: string; }
 interface Auth { user: User; csrf_token: string; }
@@ -40,7 +41,7 @@ interface SystemStatus {
 }
 
 @Component({
-  selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule, FaceCropperComponent],
+  selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule, FaceCropperComponent, EventPanelComponent],
   templateUrl: './app.component.html'
 })
 export class AppComponent implements OnDestroy {

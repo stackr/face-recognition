@@ -56,3 +56,11 @@ body { margin: 0; background: #f4f6fa; color: var(--ink); font-family: -apple-sy
   .page-heading { align-items: flex-start; flex-wrap: wrap; }
   .face-cropper { padding: 14px 10px; }
 }
+.events-panel {margin-top: 1.5rem; padding: 1.5rem;}
+.event-grid {display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr)); gap: 1rem;}
+.event-card {display: flex; gap: 1rem; padding: 1rem; border: 1px solid #dce3eb; border-radius: 12px; min-width: 0;}
+.event-card img {object-fit: cover; border-radius: 8px; flex-shrink: 0;}
+.event-details {display: grid; gap: .3rem; min-width: 0; overflow-wrap: anywhere;}
+.event-actions {display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .3rem;}
+.event-status {color: #74600d; font-size: .85rem;}
+@media (max-width: 480px) {.event-card {flex-direction: column;}}

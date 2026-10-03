@@ -80,7 +80,7 @@ class CameraRun:
 
     def clear_session(self, *, rotate=False):
         # Caller holds run.lock; replacing both objects drops candidates and all
-        # per-track state. Future event cooldowns must belong to this session too.
+        # per-track state, including event submission cooldowns.
         if rotate:
             self.stream_session_id = uuid.uuid4().hex
             self.session_captured = self.session_processed = 0
@@ -299,10 +299,11 @@ class CameraRun:
 
 
 class WorkerRuntime:
-    def __init__(self, settings, detector, face_analyzer=None, gallery=None):
+    def __init__(self, settings, detector, face_analyzer=None, gallery=None, events=None):
         self.settings, self.detector = settings, detector
         self.face_analyzer = face_analyzer
         self.gallery = gallery
+        self.events = events
         self.commands = Queue(maxsize=2)
         self.lock = threading.RLock()
         self.runs = OrderedDict()
@@ -472,6 +473,15 @@ class WorkerRuntime:
                         if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
                             continue
                         run.jpeg = encoded.tobytes()
+                        if self.events is not None and search_status == "ready":
+                            self.events.submit_tracks(
+                                run.camera_id,
+                                frame.stream_session_id,
+                                faces,
+                                tracks,
+                                gallery_revision,
+                                time.monotonic(),
+                            )
                         run.result = {
                             "stream_session_id": frame.stream_session_id,
                             "frame_id": frame.frame_id,
@@ -530,3 +540,5 @@ class WorkerRuntime:
             future.cancel()
         if self.gallery:
             self.gallery.close()
+        if self.events:
+            self.events.close()

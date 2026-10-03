@@ -15,7 +15,8 @@ function compile(file, relativeImports = {}) {
   return `data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`;
 }
 const cropper = compile('../src/app/face-cropper.component.ts');
-const {AppComponent} = await import(compile('../src/app/app.component.ts', {'./face-cropper.component':cropper}));
+const events = compile('../src/app/event-panel.component.ts');
+const {AppComponent} = await import(compile('../src/app/app.component.ts', {'./face-cropper.component':cropper, './event-panel.component':events}));
 
 function setup() {
   const oldWindow = globalThis.window;

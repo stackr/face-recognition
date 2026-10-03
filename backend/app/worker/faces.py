@@ -184,6 +184,7 @@ class TrackFaces:
 
     def process(self, analyzer, frame, tracks, live_ids):
         counts = Counter()
+        event_frame_jpeg = None
         with self.lock:
             self.tracks = {
                 key: value
@@ -245,11 +246,23 @@ class TrackFaces:
             ok, jpeg = cv2.imencode(".jpg", candidate.aligned, [cv2.IMWRITE_JPEG_QUALITY, 90])
             if not ok:
                 raise RuntimeError("Face thumbnail encoding failed")
+            if event_frame_jpeg is None:
+                image = frame.image
+                scale = min(1, 1280 / max(image.shape[:2]))
+                if scale < 1:
+                    image = cv2.resize(
+                        image, (round(image.shape[1] * scale), round(image.shape[0] * scale))
+                    )
+                frame_ok, frame_jpeg = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                if not frame_ok:
+                    raise RuntimeError("Event frame encoding failed")
+                event_frame_jpeg = frame_jpeg.tobytes()
             with self.lock:
                 state["best"] = {
                     "quality": candidate.metadata["quality"],
                     "embedding": vector,
                     "jpeg": jpeg.tobytes(),
+                    "frame_jpeg": event_frame_jpeg,
                     "frame_id": frame.frame_id,
                     "captured_at": frame.captured_at,
                     "stream_session_id": frame.stream_session_id,

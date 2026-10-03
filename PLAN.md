@@ -1002,8 +1002,18 @@ Phase 4까지 구현 및 native 서비스 반영 완료. 인물/다중 reference
 
 Phase 5까지 구현 및 native 서비스 반영 완료. RTSP 연결/읽기 실패 시 제한된 지수 backoff로 자동 재연결하고, 이전 영상·추적·얼굴·검색 후보를 제거한 새 stream session에서 복구한다. 최신 대기 frame 1개를 유지하며 늦게 끝난 이전 session의 추론 결과와 예외를 차단한다. 재시도 중 중지, 인증된 미리보기의 자동 복구 및 재연결 통계를 제공한다. 단위 테스트 54개, 실제 DB 통합 1개, Chrome E2E 5개 및 공개 localhost RTSP를 통한 실제 CUDA 중단/복구 검증을 통과했다. 신규 AI 모델/상용 서비스는 추가하지 않았고 비상업 시험 목적을 유지한다. 자세한 구현·실행 명령·측정 한계는 [Phase 5 검증 결과](docs/phase5-report.md)를 참고한다.
 
-다음 구현 범위: Phase 6 — MatchEvent 저장, 인증된 WebSocket, 이벤트 중복 방지 및 DB 조회를 통한 재연결 복구. 이벤트 cooldown은 이 단계에서 `(camera_id, stream_session_id, track_id, person_id)` 기준으로 구현하여 이전 session에서 새 session으로 이어지지 않게 한다. 전체 Live Search UI는 Phase 7에서 진행한다.
+Phase 5 완료 시 다음 범위는 Phase 6의 MatchEvent 저장, 인증된 WebSocket, 이벤트 중복 방지 및 DB 조회 재연결 복구로 정했다. 아래 2026-10-03 Phase 6 기록에 실제 진행 상태를 구분한다.
 
 2026-10-03 인물 관리 화면 변경: 인물 추가·수정·조회는 전용 페이지에서 진행한다. 목록은 첫 화면에 유지하고 등록/수정 페이지에서 얼굴 사진 등록·삭제와 사진 시험 비교를 제공한다. 저장 후 수정 URL로 전환하며 새로고침·브라우저 뒤로/앞으로 가기에서 정보를 복원한다. Angular build/TypeScript 및 전체 Chrome E2E 5개를 통과했다.
 
-2026-10-03 얼굴 사진 크롭: 로컬 JPEG/PNG 선택 후 영역 지정·이동·크기 조절·미리보기와 명시적인 얼굴 저장을 제공한다. 인물 생성 전에도 사진을 선택하고 크롭한 얼굴 저장 시 인물을 생성해 연결한다. 사진 저장 실패 시 생성된 인물과 크롭을 유지한다. 좌표/저장 흐름 테스트 5개와 타입 검사·빌드를 통과했으며, Chrome E2E는 현재 실행 환경의 브라우저 제한으로 미검증이다.
+2026-10-03 얼굴 사진 크롭: 로컬 JPEG/PNG 선택 후 영역 지정·이동·크기 조절·미리보기와 명시적인 얼굴 저장을 제공한다. 인물 생성 전에도 사진을 선택하고 크롭한 얼굴 저장 시 인물을 생성해 연결한다. 사진 저장 실패 시 생성된 인물과 크롭을 유지한다. 좌표/저장 흐름 테스트 5개와 타입 검사·빌드를 통과했다. Chrome E2E는 최초 실행에서 브라우저 제한으로 미검증이었으며 아래 권한 변경 후 검증에서 통과했다.
+
+2026-10-03 Phase 6 코드 및 격리 검증 완료: session별 tracks, MatchEvent와 commit 순서의 change journal, 별도 bounded DB/file 저장 thread, 기본 30초 cooldown과 UNIQUE 중복 방지, 인증된 조회/JPEG/WebSocket, CSRF와 운영 grant를 확인하는 확인·거부 및 감사 기록을 구현했다. after_id는 신규 이벤트를, after_change_id는 개선/검토 변경까지 복구한다. 영상 분석 화면에 최근 100건을 표시하며 event_id/change_id로 중복·늦은 응답을 처리한다. 사진 7일/기록 30일, 500 MB/50,000건 상한과 실제 cleanup을 추가했다. 신규 backend 27건과 기존 독립 4건, frontend 12건, Ruff·타입 검사·production build·SQLite migration/모델 일치 및 MariaDB offline DDL을 통과했다.
+
+Phase 6 **서비스 반영과 실제 CUDA 파이프라인 검증 완료**: 에이전트 실행 환경에서는 MariaDB/localhost 접근이 차단되어 사용자 terminal에서 실행했다. 서비스 재시작은 status=passed, resumed_cameras=[]다. native smoke의 정상 YOLO 장치 cuda:0 검사 오류를 수정하고 HTTP/WS 모의 회귀 10건을 추가하여 backend 격리 테스트 합계 41건을 통과했다. 이후 사용자 terminal에서 check_phase6.py를 재실행하여 2026-10-03 08:23:40 KST에 status=passed와 실제 검증 8개 항목을 확인했다. detector_device=cuda:0, face_device=cuda이며 후보 생성→DB/JPEG→인증된 WebSocket, 중복 방지, 확인/거부 저장·갱신, 오프라인 변경 복구와 새 session 이벤트를 통과했다. purpose=pipeline_smoke, accuracy_calibrated=false다. 당시 전체 backend 회귀·실제 DB 통합 테스트·Chrome E2E는 미검증이었으며 아래 권한 변경 후 검증에서 완료했다. 실제 Alembic head의 직접 조회는 DB 통합 테스트에 포함되어 있다. 적용 순서와 검증 범위는 [Phase 6 결과](docs/phase6-report.md)에 기록했다. 모델/가중치/라이선스·의존성 변경 없이 비상업 시험 목적을 유지한다.
+
+2026-10-03 전체 회귀·브라우저 검증 시도: backend 91건을 수집했으나 첫 fixture의 TestClient/AnyIO portal 기동에서 45초 timeout이 발생했고 asyncio wakeup socket 전송의 PermissionError(errno=1)를 확인했다. 실제 DB 통합 1건은 DB 연결 제한으로 실패했다. 기존 Chrome E2E 6건과 신규 Phase 6 1건 모두 Chrome 기동의 setsockopt EPERM/SIGTRAP로 차단되어 당시 실제 화면 검증은 미완료였다. 이벤트 화면의 확인·거부, WebSocket 중단 후 HTTP cursor 복구, 새로고침·모바일 표시·로그아웃을 검사하는 phase6.spec.ts를 추가했고 Playwright 7건 수집을 통과했다. 실행 가능한 backend 격리 41건/frontend 12건, 애플리케이션 타입 검사·production build·Ruff를 재검증했다. 기존 native smoke 통과 결과는 유지했으며 이 제한 환경의 시도는 data/reports/phase6-regression-initial.json에 status=partial로 보존했다.
+
+2026-10-03 권한 변경 후 **Phase 6 전체 회귀·브라우저 검증 완료**: 에이전트에서 DB/localhost/asyncio/Chrome 접근이 정상임을 확인했다. 전체 backend 91건과 실제 MariaDB 통합 1건을 통과했으며 실제 migration head는 `0005_match_events`다. Chrome 첫 실행에서 얼굴 Blob 전송 데이터 읽기와 WebSocket 한쪽만 닫는 테스트 코드 문제를 수정한 뒤 전체 E2E 7건을 통과했다. 실제 얼굴 크롭 JPEG 180×240 전송·112×112 등록 사진, 신규/수정/취소/재등록, RTSP 중단/복구, 이벤트 확인·거부, WebSocket 중단 중 저장한 검토의 HTTP cursor 복구·새로고침·모바일 표시·로그아웃을 확인했다. frontend 논리 테스트 12건·애플리케이션 타입 검사·production build(529.81 kB)·Ruff도 통과했다. 기존 카메라 2개·인물 3명·얼굴 2개·계정 1개와 카메라 실행 상태를 보존했고 임시 자료를 정리했다. 최종 결과는 `data/reports/phase6-regression.json`, 자세한 범위는 [Phase 6 결과](docs/phase6-report.md)에 기록했다. 이전 접근 제한 기록은 과거 시도의 결과다.
+
+다음 개발 범위는 Phase 7 전체 Live Search UI다. clip recording과 다중 camera 최적화는 각각 Phase 8/9 범위다.

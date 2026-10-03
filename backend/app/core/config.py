@@ -75,6 +75,18 @@ class Settings(BaseSettings):
     face_memory_max_references: int = Field(default=200, ge=1, le=2000)
     face_match_threshold: float = Field(default=0.75, ge=-1, le=1)
     face_collection: str = Field(default="face_embeddings", pattern=r"^[a-zA-Z0-9_-]{1,80}$")
+    api_url: str = "http://127.0.0.1:8000"
+    event_dir: Path = ROOT / "data/events"
+    event_cooldown: float = Field(default=30, ge=0, le=3600)
+    event_retention_days: int = Field(default=30, ge=1, le=365)
+    event_image_retention_days: int = Field(default=7, ge=1, le=365)
+    event_storage_max_mb: int = Field(default=500, ge=10, le=10000)
+    event_max_records: int = Field(default=50000, ge=100, le=1000000)
+    event_queue_size: int = Field(default=32, ge=1, le=128)
+    event_cleanup_interval_seconds: int = Field(default=30, ge=1, le=3600)
+    event_ws_queue_size: int = Field(default=64, ge=1, le=256)
+    event_ws_max_clients: int = Field(default=32, ge=1, le=128)
+    event_ws_send_timeout_seconds: float = Field(default=5, ge=0.1, le=30)
 
     @model_validator(mode="after")
     def tracker_thresholds(self):
@@ -89,7 +101,7 @@ class Settings(BaseSettings):
             raise ValueError("Detector threshold must preserve low-score tracking detections")
         return self
 
-    @field_validator("worker_url")
+    @field_validator("worker_url", "api_url")
     @classmethod
     def loopback_worker(cls, value: str) -> str:
         from urllib.parse import urlsplit
@@ -111,6 +123,7 @@ class Settings(BaseSettings):
         "yolo_model_path",
         "face_model_dir",
         "reference_dir",
+        "event_dir",
         "video_dir",
         "log_dir",
         "gpu_report_path",

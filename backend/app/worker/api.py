@@ -48,12 +48,15 @@ def create_worker(
             from app.worker.gallery import ReferenceGallery
 
             gallery = ReferenceGallery(settings) if enable_gallery else None
+            from app.worker.events import EventWriter
+
+            events = EventWriter(settings) if enable_gallery else None
         except Exception as exc:
             logging.getLogger("cctv.worker").error(
                 "Detector startup failed; type=%s", type(exc).__name__
             )
             raise
-        app.state.runtime = WorkerRuntime(settings, active_detector, active_faces, gallery)
+        app.state.runtime = WorkerRuntime(settings, active_detector, active_faces, gallery, events)
         logging.getLogger("cctv.worker").info(
             "Worker ready; device=%s model=%s",
             active_detector.info["actual_device"],
@@ -92,6 +95,7 @@ def create_worker(
             else {"status": "disabled"},
             "resources": runtime.detector.resources(),
             "cameras": states,
+            "events": runtime.events.status() if runtime.events else {"status": "disabled"},
         }
 
     @app.post("/internal/videos/probe", dependencies=[Depends(authorized)])

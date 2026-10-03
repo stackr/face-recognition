@@ -43,18 +43,31 @@ test('인물 생성 전 로컬 사진 크롭, 선택 영역만 전송, 수정 �
     await expect(page.locator('.crop-preview')).toBeVisible();
     mkdirSync('../data/screenshots', {recursive:true});
     await page.screenshot({path:'../data/screenshots/face-crop-mobile.png', fullPage:true});
+    // Chrome can omit a Blob request's bytes from DevTools. Inspect the same Blob
+    // passed to the real XHR transport without replacing or modifying the upload.
+    await page.evaluate(() => {
+      const state = window as typeof window & {faceUploadSize?: Promise<{width: number; height: number}>};
+      const send = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.send = function (body) {
+        if (body instanceof Blob && body.type === 'image/jpeg') {
+          state.faceUploadSize = createImageBitmap(body).then(bitmap => {
+            const size = {width: bitmap.width, height: bitmap.height};
+            bitmap.close();
+            return size;
+          });
+        }
+        return send.call(this, body);
+      };
+    });
     const created = page.waitForResponse(response => response.url().endsWith('/api/persons') && response.request().method() === 'POST');
     const sent = page.waitForRequest(request => /\/api\/persons\/\d+\/faces$/.test(new URL(request.url()).pathname) && request.method() === 'POST');
     await save.click();
     const person = await created;
     personId = (await person.json()).id;
     expect(person.status()).toBe(201);
-    const uploaded = await sent;
-    const bytes = [...uploaded.postDataBuffer()!];
-    const cropped = await page.evaluate(async bytes => {
-      const bitmap = await createImageBitmap(new Blob([new Uint8Array(bytes)], {type:'image/jpeg'}));
-      const size = {width:bitmap.width, height:bitmap.height}; bitmap.close(); return size;
-    }, bytes);
+    await sent;
+    const cropped = await page.evaluate(() =>
+      (window as typeof window & {faceUploadSize?: Promise<{width: number; height: number}>}).faceUploadSize);
     expect(cropped).toEqual({width:180, height:240});
     await expect(page).toHaveURL(new RegExp(`#/persons/${personId}/edit$`));
     await expect(page.locator('.face-card')).toHaveCount(1);

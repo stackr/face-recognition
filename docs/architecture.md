@@ -1,6 +1,6 @@
 # Architecture
 
-비상업 시험용 프로젝트이며 현재 Phase 4까지 구현했다. 이벤트/자동 재연결은 후속 구현 대상으로 표시한다.
+비상업 시험용 프로젝트이며 Phase 6 구현·서비스 반영·실제 CUDA 파이프라인 및 전체 회귀 검증을 완료했다. native smoke 8개 항목을 통과했으며 detector는 cuda:0, face model은 cuda다. 권한 변경 후 전체 backend 91건, 실제 MariaDB 통합 1건, Chrome E2E 7건과 frontend 논리 테스트 12건을 통과했다. 실제 Alembic head는 `0005_match_events`로 확인했다.
 
 ## 현재 구현
 
@@ -35,13 +35,13 @@ flowchart LR
 - Qdrant는 localhost에 바인딩하는 native 바이너리다. Phase 1은 임시 smoke collection을 사용한다. Phase 4의 `face_embeddings`는 512D cosine, owner/model-version metadata로 검증하며 기존 다른 collection을 덮어쓰지 않는다.
 - native user services는 로그인 사용자의 권한과 프로젝트 working directory로 실행한다. API/worker는 각각 `application.log`/`worker.log`를 rotation한다. native decoder stderr는 RTSP 주소 유출을 막기 위해 worker에서 숨긴다.
 
-## 구현된 GPU worker (Phase 2~5)
+## 구현된 GPU worker (Phase 2~6)
 
 API와 GPU worker는 별도 프로세스로 운영한다. worker 하나가 YOLO 모델과 CUDA inference backend를 소유한다. 카메라별 capture thread, latest-frame buffer, tracker를 분리하고 하나의 순차 scheduler에서 모델을 공유한다. 한 순회에서 각 준비된 카메라를 한 번씩 처리하며 목표 cadence는 기본 5 FPS다. admission 상한은 기본 4이며 재연결 대기도 포함한다. API worker는 하나이며 GPU 라이브러리를 로딩하지 않는다. 얼굴 ONNX session 3개도 같은 worker가 공유한다.
 
 통신은 localhost:8001의 내부 HTTP와 service token을 사용한다. API는 start/stop ACK를 확인한다. start는 `opening`을 반환하며 실제 분석 성공 후 `running`이 된다. source 실패는 secret 없는 code로 보고하고 worker 장애를 성공으로 응답하지 않는다. 변경/업로드/시작/삭제는 카메라별로 직렬화한다. worker는 status와 최신 JPEG를 제공하며 내부 endpoint는 Nginx 공개 proxy에 포함하지 않는다. 등록 사진 추론은 길이 2의 bounded queue를 통해 같은 GPU scheduler에서 카메라 추론과 순차 실행한다. reference reload 명령은 SQL revision 이상을 읽은 ACK를 확인한다.
 
-후속 Phase에서는 worker가 MatchEvent를 DB에 먼저 저장한 후 event_id를 API 내부 endpoint에 전달한다. API는 인증된 WebSocket으로 배포한다. 알림에는 bounded retry를 적용하고 DB event_id 기준 조회로 누락을 복구한다. 초기 API는 단일 Uvicorn 프로세스다. API 다중 프로세스 확장 시에는 모든 API 프로세스로 이벤트를 배포하는 장치를 별도로 구현한다.
+Phase 6은 worker의 별도 EventWriter thread가 bounded snapshot queue에서 MatchEvent를 DB에 먼저 저장한 후 event_id를 API 내부 endpoint에 전달한다. 저장/알림 각각 최대 3회 재시도하며 GPU scheduler는 기다리지 않는다. API는 인증된 WebSocket으로 배포하며 DB journal을 1초마다 조회해 알림 실패도 복구한다. 신규 event_id 조회와 생성/갱신/검토를 포함한 change_id 조회를 구분한다. 초기 API는 단일 Uvicorn 프로세스다. 다중 프로세스 확장은 별도 검증/구현 범위다.
 
 ## frame, tracking 및 미리보기
 
@@ -49,7 +49,7 @@ API와 GPU worker는 별도 프로세스로 운영한다. worker 하나가 YOLO 
 
 frame 및 분석 결과에는 `camera_id`, `stream_session_id`, `frame_id`, capture timestamp가 있다. UTC는 저장 및 화면 시각, monotonic clock은 latency/timeout 측정에 사용한다. tracker update의 실제 간격과 lost-track 유지 시간을 반영한다.
 
-추적 ID의 유효 범위는 camera + stream session + track이다. ByteTrack의 기본 process-global ID counter를 camera-local counter로 대체하여 다른 카메라 시작이 기존 ID에 영향을 주지 않는다. lost 유지 시간은 기본 3초이며 실제 monotonic 경과 시간으로 만료한다. 기본 5 FPS에 맞게 frame buffer를 15로 변환하고 누락된 분석 tick의 Kalman 예측도 반영한다. RTSP 실패, MP4 반복, 분석 재시작에서 session UUID를 새로 만들고 tracker/TrackFaces 전체를 교체한다. frame 번호는 session 안에서 1부터 시작하며 총 처리 통계와 구분한다. 비동기 추론의 publish/예외 처리 모두 session과 cancel을 확인한다. Phase 6의 DB track에는 독립된 기본키를 부여하고 event dedup/cooldown key는 `(camera_id, stream_session_id, track_id, person_id)`로 분리한다. 현재 검색 후보는 TrackFaces에 있고 이벤트 cooldown은 아직 없다.
+추적 ID의 유효 범위는 camera + stream session + track이다. ByteTrack의 기본 process-global ID counter를 camera-local counter로 대체하여 다른 카메라 시작이 기존 ID에 영향을 주지 않는다. lost 유지 시간은 기본 3초이며 실제 monotonic 경과 시간으로 만료한다. 기본 5 FPS에 맞게 frame buffer를 15로 변환하고 누락된 분석 tick의 Kalman 예측도 반영한다. RTSP 실패, MP4 반복, 분석 재시작에서 session UUID를 새로 만들고 tracker/TrackFaces 전체를 교체한다. frame 번호는 session 안에서 1부터 시작하며 총 처리 통계와 구분한다. 비동기 추론의 publish/예외 처리 모두 session과 cancel을 확인한다. Phase 6의 DB track에는 독립된 기본키를 부여하고 event dedup/cooldown key는 `(camera_id, stream_session_id, track_id, person_id)`다. 기본 30초 submission cooldown은 TrackFaces에 속하며 track 만료/세션 교체 시 제거한다. DB UNIQUE와 event_state 잠금이 동시 후보/재시도의 중복 저장을 방지한다.
 
 MVP 영상은 인증된 `/api/cameras/{id}/preview`에서 annotation을 그린 MJPEG를 제한 FPS로 전달한다. 이미 분석한 frame을 재사용하며 viewer마다 capture/inference를 새로 시작하지 않는다. 시청자는 기본 camera당 4명/전체 16명이다. 각 시청자는 캐시된 JPEG를 한 프레임씩 소비하고 ASGI backpressure를 적용하여 큐를 쌓지 않는다. 짧은 DB session으로 2초마다 로그인/계정/카메라 grant를 재확인하고 종료 시 viewer slot을 반환한다. JPEG는 최대 너비 1280으로 제한한다. 이후 WebRTC/HLS를 선택하면 encoding 비용/지연을 측정하고 별도 bbox overlay를 frame timestamp에 맞춘다.
 
@@ -108,7 +108,26 @@ Phase 8의 clip pre-buffer는 압축 segment의 디스크 보관을 우선 검�
 
 ONNX Runtime은 CUDA/cuDNN을 preload하고 매 session startup에서 실제 CUDA Conv profile을 검사한다. 요청된 CUDA가 준비되지 않으면 기본값으로 실패하고 CPU 성공으로 보고하지 않는다. session마다 arena limit 1 GiB, unified CUDA stream, cuDNN workspace 제한과 `enable_mem_pattern=False`/`kNextPowerOfTwo`를 사용한다. 검증 중 pinned ORT/model의 반복 추론에서 arena 고갈을 재현하여 이 설정으로 수정했다. limit은 arena에만 적용되므로 총 GPU 메모리는 NVML로 별도 측정한다. [공식 CUDA provider 설정](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html)을 참고한다.
 
-품질 데이터/정답 예제의 촬영 group 분리 및 독립 평가 자료의 범위는 [calibration-data.md](calibration-data.md)에 정의했다. Phase 4는 해당 모델 버전으로 등록·검색·삭제·보관 정책을 적용한다. MatchEvent 저장은 Phase 6 범위다.
+품질 데이터/정답 예제의 촬영 group 분리 및 독립 평가 자료의 범위는 [calibration-data.md](calibration-data.md)에 정의했다. Phase 4는 해당 모델 버전으로 등록·검색·삭제·보관 정책을 적용한다. Phase 6은 같은 모델을 사용한 MatchEvent 저장 코드를 추가했다.
+
+## Phase 6 이벤트 저장과 전달
+
+```mermaid
+flowchart LR
+    GPU[공유 GPU scheduler] -->|후보와 JPEG| Queue[bounded snapshot queue]
+    Queue --> Writer[EventWriter thread]
+    Writer -->|행 잠금 및 commit| SQL[(MariaDB event / journal)]
+    Writer -->|내부 알림| API[단일 API broker]
+    SQL -->|1초 journal 조회| API
+    API -->|인증과 grant 검사 / bounded WS| Browser[Angular event feed]
+    Browser -->|HTTP cursor 복구 / 검토| API
+```
+
+event_state 잠금 아래 ID를 발급하고 이벤트·변경 journal을 함께 commit해 cursor와 commit 순서를 맞춘다. candidate 사진 개선은 같은 event_id를 갱신하고 change_id를 증가시킨다. 확인/거부 후에는 자동 추론이 사진/상태를 덮어쓰지 않는다. 검토 API는 현재 계정과 카메라 운영·인물 조회 권한 및 CSRF를 검사하고 감사 로그를 같은 transaction에서 저장한다.
+
+얼굴과 그 관측의 압축 frame을 data/events에 private JPEG로 보관한다. 한 tick의 frame JPEG는 여러 best face가 공유한다. image 7일/event 30일, 저장 한도 500 MB/50,000건, 저장 queue 32건이 기본이다. TTL/deleting/삭제 상태는 조회 즉시 차단하며 30초마다 최대 200건을 정리한다. commit 응답 유실은 파일을 보존하고 1시간 지난 orphan을 SQL 기준으로 정리한다.
+
+WebSocket은 정확한 allowed Origin과 로그인 cookie를 확인하며 전송/2초 heartbeat마다 새 transaction으로 계정/카메라·인물 grant를 검사한다. 연결당 queue 64개/전체 32개/send timeout 5초이며 초과는 1013으로 종료한다. Angular는 event_id별 가장 큰 change_id를 유지하고 HTTP next_cursor로 누락을 복구한다. 재접속·권한 변경·30초 snapshot 조회 및 logout의 늦은 응답을 구분한다. native 적용/측정 한계와 API 규칙은 [Phase 6 결과](phase6-report.md)에 기록했다.
 
 ## Phase 4 reference gallery 및 수명
 

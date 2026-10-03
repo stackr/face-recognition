@@ -15,7 +15,7 @@ router = APIRouter(tags=["System"])
 
 @router.get("/api/health")
 def health():
-    return {"status": "ok", "phase": 5}
+    return {"status": "ok", "phase": 6}
 
 
 @router.get("/api/system/status")
@@ -39,6 +39,7 @@ def system_status(
         worker = request.app.state.worker.request("GET", "/internal/status").json()
         if user.role != "admin":
             worker.pop("cameras", None)
+            worker.pop("events", None)
         else:
             worker["cameras"] = [
                 filter_camera_status(db, user, state) for state in worker.get("cameras", [])
@@ -79,7 +80,7 @@ def system_status(
         except (OSError, ValueError):
             gpu["status"] = "invalid_report"
     return {
-        "phase": 5,
+        "phase": 6,
         "checked_at": datetime.now(UTC).isoformat(),
         "services": dependencies,
         "gpu": gpu,

@@ -1,6 +1,6 @@
 # CCTV Search
 
-비상업 시험용 CCTV 얼굴 검색 프로젝트. 현재 **Phase 5**까지 구현했다. Ubuntu native 서비스와 Python venv를 사용한다.
+비상업 시험용 CCTV 얼굴 검색 프로젝트. **Phase 6 구현·서비스 반영·실제 CUDA 파이프라인 및 전체 회귀 검증을 완료했다.** backend 91건, 실제 MariaDB 통합 1건, Chrome E2E 7건과 frontend 논리 테스트 12건을 통과했다. DB migration head는 `0005_match_events`다. Ubuntu native 서비스와 Python venv를 사용한다.
 
 로그인/카메라 관리에 더해 MP4 및 기본 RTSP 입력, YOLO11n 사람 탐지, ByteTrack 추적, 인증된 MJPEG 미리보기, 카메라별 영상 접근 권한, 별도 GPU worker와 1채널 benchmark를 사용할 수 있다. SCRFD 얼굴 탐지, 5-point alignment, 품질/자세 평가와 L2 정규화된 512차원 ArcFace 특징을 생성한다. 인물·다중 얼굴 등록, Memory/Qdrant cosine 검색, 인증된 등록 이미지와 인물별 권한, 삭제 재시도 및 이미지·특징별 보관 기간 정리를 제공한다. 전체 요구 사항은 [PLAN.md](PLAN.md), 구현 구성과 후속 설계는 [architecture.md](docs/architecture.md)를 참고한다.
 
@@ -128,7 +128,7 @@ npm --prefix frontend run start
 .venv/bin/uvicorn --app-dir backend app.main:app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log
 ```
 
-개발 서버는 `/api`를 백엔드로 proxy하여 같은 origin의 인증 cookie를 사용한다. backend는 GPU 모델을 로딩하지 않는다. 이미 systemd 서비스가 실행 중이면 수동 명령을 중복 실행하지 않는다.
+개발 서버는 `/api`와 `/ws`를 백엔드로 proxy하여 같은 origin의 인증 cookie를 사용한다. backend는 GPU 모델을 로딩하지 않는다. 이미 systemd 서비스가 실행 중이면 수동 명령을 중복 실행하지 않는다.
 
 ## systemd 실행
 
@@ -269,7 +269,7 @@ benchmark는 입력 1280×720/10 FPS, detector 640, 얼굴 detector 320, 실제 
 
 **인물 관리** 첫 화면에는 검색 대상 인물 목록을 표시한다. **인물 추가**를 눌러 등록 페이지에서 이름과 로컬 얼굴 사진을 입력한다. 사진에서 얼굴 영역을 크롭하고 미리보기를 확인한 뒤 **크롭한 얼굴 저장**을 누르면 인물과 얼굴을 순서대로 등록한다. 인물 정보만 먼저 저장할 수도 있다. 저장 후에는 해당 인물의 수정 페이지에서 사진 등록과 **사진으로 시험 비교**를 이어서 진행한다. 기존 인물은 목록의 **수정** 버튼으로 수정 페이지를 열어 정보와 등록 얼굴을 관리한다. 상단 **목록으로** 버튼으로 돌아가며 새로고침과 브라우저 뒤로/앞으로 가기를 지원한다. 등록 주소는 `/#/persons/new`, 수정 주소는 `/#/persons/{id}/edit`다. JPEG/PNG 여러 장을 선택하면 한 장씩 크롭 영역을 확인하고 저장하거나 취소한다. 원본 위에서 드래그해 영역을 지정하고, 영역 이동·오른쪽 아래 손잡이·좌표 입력으로 조정한다. 선택 영역은 원래 해상도의 JPEG로 전송하고 서버에서 얼굴 탐지·품질 검사·112×112 정렬을 수행한다. 실패하면 현재 크롭을 유지해 다시 조정할 수 있다. 사진은 각 10 MB 이하, 가로·세로 4096px 이하, 1200만 픽셀 이하이며 한 사람만 있어야 한다. 기존 얼굴 품질 기준을 적용하고 얼굴 없음·여러 얼굴·품질 미달은 이유를 표시한다. 인물당 기본 최대 20개, 전체 최대 100명이다. 등록 이미지·시험 비교 사진의 원본은 저장하지 않으며, 품질을 통과한 정렬 얼굴 112×112 JPEG만 private `data/references`에 보관한다.
 
-**사진으로 시험 비교**는 admin/operator에게 제공한다. 사용 중이며 해당 계정에 인물 조회 권한이 있는 얼굴만 검색한다. 점수는 한 인물의 여러 등록 얼굴 중 최대 cosine similarity다. 0.75 이상을 `유사도 후보`로 표시하고 아래 점수도 시험 비교 결과에서 구분한다. 확정 신원이나 정확도 보정 결과가 아니다. 영상 분석의 추적별 얼굴에도 같은 후보가 표시되며 이벤트 저장/알림·확인/거부 기능은 후속 Phase 6~7에 구현한다.
+**사진으로 시험 비교**는 admin/operator에게 제공한다. 사용 중이며 해당 계정에 인물 조회 권한이 있는 얼굴만 검색한다. 점수는 한 인물의 여러 등록 얼굴 중 최대 cosine similarity다. 0.75 이상을 `유사도 후보`로 표시하고 아래 점수도 시험 비교 결과에서 구분한다. 확정 신원이나 정확도 보정 결과가 아니다. 영상 분석의 추적별 얼굴에도 같은 후보가 표시된다. Phase 6에는 이벤트 저장/알림·확인/거부를 추가하고 실제 CUDA 파이프라인 검증을 통과했다.
 
 관리자는 인물 수정에서 `검색 대상 사용`을 끄거나 인물·얼굴을 삭제할 수 있다. 일반 계정은 목록의 **인물 보기**로 조회 페이지를 열며, 인물별 grant가 있어야 정보·사진·후보 이름을 제공한다. `다른 계정의 인물·이미지 접근 권한`에서 사용자 아이디로 허용/해제한다. 카메라 영상 권한과 인물 권한은 각각 검사한다. 이미지 조회는 cookie 인증 API를 사용하며 공개 static URL이 아니다. 등록/수정/삭제/권한/사진 조회/시험 검색/만료 정리를 감사 기록에 남긴다.
 
@@ -309,11 +309,35 @@ RTSP는 TCP로 수신하며 기본 연결 제한 시간은 5초, 프레임 읽�
 npm --prefix frontend run test:e2e
 ```
 
-`check_phase5.py`와 브라우저 테스트는 GPU 검증/benchmark와 동시에 실행하지 않는다. 결과는 `data/reports/phase5-native.json`, 검증 범위는 [phase5-report.md](docs/phase5-report.md)에 기록한다. 이벤트 저장·중복 방지·WebSocket은 다음 Phase 6 범위다.
+`check_phase5.py`와 브라우저 테스트는 GPU 검증/benchmark와 동시에 실행하지 않는다. 결과는 `data/reports/phase5-native.json`, 검증 범위는 [phase5-report.md](docs/phase5-report.md)에 기록한다. 이벤트 저장·중복 방지·WebSocket의 Phase 6 구현/검증은 아래 절을 참고한다.
+
+## 검색 이벤트 및 Phase 6 적용
+
+Phase 6 구현과 전체 backend 회귀 91건, frontend 논리 테스트 12건, 실제 MariaDB 통합 1건, Chrome E2E 7건 및 production build를 완료했다. 실제 DB에서 `0005_match_events` head와 추가 테이블을 확인했다. 사용자 terminal의 native smoke 8개 항목도 통과했으며 detector_device=cuda:0, face_device=cuda다. 실제 이벤트 저장·인증된 WebSocket·사진 접근·중복 방지·검토·재연결 복구·새 session 이벤트를 확인했다. 초기 적용 시에는 프로젝트 root 기준으로 다음을 순서대로 실행한다.
+
+```bash
+.venv/bin/alembic -c backend/alembic.ini upgrade head
+.venv/bin/python scripts/restart_analysis.py
+.venv/bin/python scripts/check_phase6.py
+```
+
+적용 후 영상 분석 화면에서 최근 검색 이벤트 100건과 확인/거부를 제공한다. 후보는 같은 카메라·session·track·인물별 한 건이며 기본 30초 cooldown 후 사진 개선을 반영한다. 확인/거부는 admin 또는 해당 카메라의 운영 grant가 있는 operator만 가능하다. 조회와 사진 접근에는 카메라·인물 grant를 함께 검사한다. 사진 7일/기록 30일, 저장 한도 500 MB/50,000건이며 `.env.example`의 EVENT 설정으로 조정한다. 녹화 클립은 Phase 8 범위다.
+
+`GET /api/events?after_id=...`는 신규 기록, `?after_change_id=...`는 기존 이벤트의 변경도 복구한다. limit은 최대 100이며 next_cursor/has_more로 페이지를 진행한다. `/ws/events`는 cookie/Origin/권한과 제한 queue를 검사한다. nginx의 8080 origin을 사용할 경우 실제 브라우저 주소를 `ALLOWED_ORIGINS`에 추가해야 한다. API는 한 프로세스로 실행하며 migration이 없거나 DB 초기 연결이 실패하면 Phase 6 API startup을 중단한다.
+
+API 규칙, 검증 범위 및 전체 회귀/native 적용 명령은 [phase6-report.md](docs/phase6-report.md)에 기록했다. 전체 Live Search 배치·필터 UI는 Phase 7 범위다.
+
+2026-10-03 권한 변경 후 에이전트에서 전체 회귀와 실제 브라우저 검증을 완료했다. 얼굴 크롭의 실제 전송 JPEG 크기, 등록·수정·취소, RTSP 중단/복구, 이벤트 확인·거부와 WebSocket 중단 후 HTTP cursor 복구, 새로고침·모바일 표시·로그아웃을 확인했다. 기존 카메라·인물·얼굴·계정 및 카메라 실행 상태를 보존했고 자신이 만든 임시 자료를 정리했다. 결과는 `data/reports/phase6-regression.json`에 기록했으며 다음 명령으로 반복할 수 있다.
+
+```bash
+CCTV_RUN_INTEGRATION=1 .venv/bin/python -m pytest -m integration -q
+.venv/bin/python -m pytest -m 'not integration' -q
+npm --prefix frontend run test:e2e
+```
 
 ## Troubleshooting
 
-- `Operation not permitted`, 로컬 연결 실패 또는 GPU unavailable: 실행 환경이 network/GPU device 접근을 차단하는지 확인한다. 이번 검증에서는 Codex sandbox 밖에서 native service/GPU/브라우저 검증을 실행했다.
+- `Operation not permitted`, 로컬 연결 실패 또는 GPU unavailable: 실행 환경이 network/GPU device 접근을 차단하는지 확인한다. 이전 제한 세션의 DB/Chrome 검증은 실행하지 못했으나 권한 변경 후 전체 회귀를 통과했다.
 - DB 503: `.env` 연결 정보, MariaDB 실행 여부 및 migration 적용을 확인한다. credentials를 로그에 출력하여 확인하지 않는다.
 - Qdrant 연결 실패: user service 상태, localhost:6333 충돌, binary/version 일치 여부를 확인한다.
 - 로그인 후 변경 요청 403: 동일 origin proxy, `ALLOWED_ORIGINS`, CSRF header 및 admin role을 확인한다.

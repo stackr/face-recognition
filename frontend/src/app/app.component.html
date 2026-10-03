@@ -156,6 +156,7 @@
             <small class="face-note">품질 기준과 자세 추정은 시험용 설정입니다. 특징 준비는 인물 확인을 의미하지 않습니다.</small>
           </section>
         }
+        <app-event-panel [requestHeaders]="headers()" (sessionExpired)="clearSession()" />
       }
     </main>
   </div>

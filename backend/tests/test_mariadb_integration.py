@@ -22,10 +22,11 @@ def test_migrated_mariadb_auth_and_crud():
     engine = make_engine(settings)
     tables = set(inspect(engine).get_table_names())
     assert {"users", "auth_sessions", "cameras", "audit_logs", "alembic_version"} <= tables
+    assert {"tracks", "match_events", "event_state", "event_changes"} <= tables
     with engine.connect() as connection:
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "0004_person_faces"
+            == "0005_match_events"
         )
     name = "integration_" + uuid.uuid4().hex[:16]
     password = uuid.uuid4().hex

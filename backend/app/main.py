@@ -8,12 +8,14 @@ from fastapi.responses import JSONResponse
 from qdrant_client import QdrantClient
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.api import analysis, auth, cameras, persons, system
+from app.api import analysis, auth, cameras, events, persons, system
 from app.core.config import Settings
 from app.core.logging import configure_logging
 from app.core.security import LoginLimiter
 from app.db.session import make_engine
 from app.services.camera_operations import CameraOperations
+from app.services.event_stream import EventBroker
+from app.services.events import EventStore
 from app.services.references import ReferenceService
 from app.services.worker_client import ViewerLimits, WorkerClient
 
@@ -42,16 +44,33 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         configure_logging(settings.log_dir)
-        logging.getLogger("cctv").info("API started; phase=5")
+        logging.getLogger("cctv").info("API started; phase=6")
+        await app.state.event_broker.start()
+
+        async def maintain_events():
+            while True:
+                try:
+                    await asyncio.to_thread(app.state.events.cleanup)
+                except Exception as exc:
+                    logging.getLogger("cctv.events").warning(
+                        "Event maintenance failed; type=%s", type(exc).__name__
+                    )
+                await asyncio.sleep(settings.event_cleanup_interval_seconds)
+
+        maintenance = asyncio.create_task(maintain_events()) if start_cleanup else None
         if start_cleanup:
             app.state.references.start()
         yield
+        if maintenance:
+            maintenance.cancel()
+            await asyncio.gather(maintenance, return_exceptions=True)
+        await app.state.event_broker.close()
         app.state.references.close()
         vector_client.close()
         app.state.worker.client.close()
         engine.dispose()
 
-    app = FastAPI(title="CCTV Search", version="0.5.0", lifespan=lifespan)
+    app = FastAPI(title="CCTV Search", version="0.6.0", lifespan=lifespan)
     app.state.settings, app.state.engine = settings, engine
     app.state.qdrant, app.state.login_limiter = vector_client, LoginLimiter()
     app.state.worker = WorkerClient(settings, worker_transport)
@@ -60,6 +79,8 @@ def create_app(
     app.state.reference_upload_lock = asyncio.Lock()
     app.state.camera_operations = CameraOperations()
     app.state.references = ReferenceService(settings, engine, vector_client, app.state.worker)
+    app.state.events = EventStore(settings, engine)
+    app.state.event_broker = EventBroker(app.state.events)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -98,6 +119,7 @@ def create_app(
     app.include_router(analysis.router)
     app.include_router(persons.router)
     app.include_router(system.router)
+    app.include_router(events.router)
     return app
 
 
