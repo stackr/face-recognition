@@ -66,6 +66,7 @@ class EventWriter:
                     del attempts[key]
                 for match in matches:
                     person_id = match["person_id"]
+                    evidence = state.get("match_samples", {}).get(person_id, best)
                     if now - attempts.get(person_id, float("-inf")) < max(
                         0.5, self.settings.event_cooldown
                     ):
@@ -77,11 +78,11 @@ class EventWriter:
                         person_id,
                         match["face_id"],
                         revision,
-                        best["captured_at"],
+                        evidence["captured_at"],
                         match["similarity"],
-                        best["quality"],
-                        best["jpeg"],
-                        best["frame_jpeg"],
+                        evidence["quality"],
+                        evidence["jpeg"],
+                        evidence["frame_jpeg"],
                     )
                     if self.submit(candidate):
                         attempts[person_id] = now

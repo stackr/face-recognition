@@ -120,7 +120,7 @@ class FaceModels:
                 source = str(directory / name)
                 if name == "det_10g.onnx":
                     # Release input is dynamic, but output metadata contains 640px counts.
-                    # Correct only shape annotations in memory for our fixed 320px input.
+                    # Correct annotations for both 320px and adaptive 640px inputs.
                     graph = onnx.load(source)
                     for output in graph.graph.output:
                         output.type.tensor_type.shape.dim[0].dim_param = "anchors"
@@ -141,6 +141,17 @@ class FaceModels:
                     swapRB=True,
                 )
                 outputs = session.run(None, {session.get_inputs()[0].name: blob})
+                if name == "det_10g.onnx":
+                    retry_blob = cv2.dnn.blobFromImage(
+                        np.zeros((640, 640, 3), dtype=np.uint8),
+                        1 / std,
+                        (640, 640),
+                        (mean,) * 3,
+                        swapRB=True,
+                    )
+                    retry_outputs = session.run(None, {session.get_inputs()[0].name: retry_blob})
+                    if len(retry_outputs) != 9 or retry_outputs[0].size != 12800:
+                        raise ValueError("Unexpected 640px detector outputs")
                 expected = {"det_10g.onnx": 9, "1k3d68.onnx": 1, "w600k_r50.onnx": 1}[name]
                 if len(outputs) != expected:
                     raise ValueError("Unexpected face model outputs")
@@ -194,6 +205,7 @@ class FaceModels:
             "embedding_dimension": 512,
             "embedding_normalization": "L2",
             "detector_input": [320, 320],
+            "retry_detector_input": [640, 640],
             "alignment_size": [112, 112],
             "models": evidence,
             "quality_calibrated": False,
@@ -204,19 +216,21 @@ class FaceModels:
         session = self.sessions[name]
         return session.run(None, {session.get_inputs()[0].name: blob})
 
-    def detect(self, image):
+    def detect(self, image, side=320):
+        if side not in {320, 640}:
+            raise ValueError("Invalid detector size")
         height, width = image.shape[:2]
-        scale = min(320 / width, 320 / height)
+        scale = min(side / width, side / height)
         rw, rh = max(1, round(width * scale)), max(1, round(height * scale))
-        canvas = np.zeros((320, 320, 3), dtype=np.uint8)
+        canvas = np.zeros((side, side, 3), dtype=np.uint8)
         canvas[:rh, :rw] = cv2.resize(image, (rw, rh))
-        outputs = self.run("det_10g.onnx", canvas, 320, 127.5, 128.0)
+        outputs = self.run("det_10g.onnx", canvas, side, 127.5, 128.0)
         all_boxes, all_points, all_scores = [], [], []
         for index, stride in enumerate((8, 16, 32)):
             scores = outputs[index].reshape(-1)
             distances = outputs[index + 3].reshape(-1, 4) * stride
             offsets = outputs[index + 6].reshape(-1, 5, 2) * stride
-            coordinates = np.mgrid[: 320 // stride, : 320 // stride][::-1].transpose(1, 2, 0)
+            coordinates = np.mgrid[: side // stride, : side // stride][::-1].transpose(1, 2, 0)
             anchors = np.repeat(coordinates.reshape(-1, 2) * stride, 2, axis=0)
             keep = np.flatnonzero(scores >= self.settings.face_detection_threshold)
             if not len(keep):

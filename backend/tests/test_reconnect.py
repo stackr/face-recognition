@@ -103,6 +103,7 @@ def test_rtsp_reconnect_clears_faces_tracks_preview_and_session(app_context, mon
                 s["reconnects"] == 1
                 and s["state"] == "running"
                 and s["face_counts"].get("embeddings_created", 0) >= 2
+                and s["dropped_frames"] > 0
             ),
         )
         assert recovered["state"] == "running" and recovered["error_code"] is None

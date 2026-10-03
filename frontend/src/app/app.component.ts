@@ -5,6 +5,8 @@ import { FormsModule } from '@angular/forms';
 import { firstValueFrom, timeout } from 'rxjs';
 import { FaceCropperComponent } from './face-cropper.component';
 import { EventPanelComponent } from './event-panel.component';
+import { FunctionSettingsComponent } from './function-settings.component';
+import { RecognitionLogsComponent } from './recognition-logs.component';
 
 interface User { id: number; username: string; role: string; }
 interface Auth { user: User; csrf_token: string; }
@@ -24,6 +26,8 @@ interface FaceStatus {
   face_size?: number[]; blur_score?: number; brightness?: number; yaw?: number; pitch?: number; roll?: number;
   best?: {quality: number; frame_id: number; captured_at: string; model_version: string};
   matches?: Match[];
+  sample_count?: number;
+  comparison?: {outcome: string; top_similarity: number | null; threshold: number};
 }
 interface AnalysisTrack {track_id: number; confidence: number; face?: FaceStatus;}
 interface AnalysisStatus {
@@ -43,7 +47,7 @@ interface SystemStatus {
 }
 
 @Component({
-  selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule, FaceCropperComponent, EventPanelComponent],
+  selector: 'app-root', standalone: true, imports: [CommonModule, FormsModule, FaceCropperComponent, EventPanelComponent, FunctionSettingsComponent, RecognitionLogsComponent],
   templateUrl: './app.component.html'
 })
 export class AppComponent implements OnDestroy {
@@ -53,7 +57,8 @@ export class AppComponent implements OnDestroy {
   loading = signal(true);
   busy = signal(false);
   backend = signal('확인 중');
-  view = signal<'dashboard' | 'cameras' | 'persons' | 'person-editor' | 'live'>('dashboard');
+  view = signal<'dashboard' | 'cameras' | 'persons' | 'person-editor' | 'live' | 'logs' | 'settings'>('dashboard');
+  controlsRefresh = signal(0);
   status = signal<SystemStatus | null>(null);
   cameras = signal<Camera[]>([]);
   cameraSearch = signal('');
@@ -167,8 +172,9 @@ export class AppComponent implements OnDestroy {
         }
       });
     } else {
-      this.view.set(live ? 'live' : path === 'persons' || path === 'cameras' ? path : 'dashboard');
+      this.view.set(live ? 'live' : path === 'persons' || path === 'cameras' || path === 'logs' || path === 'settings' ? path : 'dashboard');
       if (path === 'persons') this.refreshPersons();
+      if (path === 'logs') this.refresh();
       if (live && this.camerasLoaded) {
         // A camera may have been added in another tab since this list was loaded.
         if (this.liveRouteId === null || this.viewableCameras().some(camera => camera.camera_id === this.liveRouteId)) {
@@ -182,7 +188,7 @@ export class AppComponent implements OnDestroy {
   pageTitle() {
     if (this.view() === 'person-editor') return this.user()?.role === 'admin'
       ? (this.personEditingId === null ? '인물 추가' : '인물 수정') : '인물 정보';
-    return {dashboard:'시스템 준비 상태', cameras:'카메라 관리', persons:'인물 관리', live:'Live Search'}[this.view() as 'dashboard' | 'cameras' | 'persons' | 'live'];
+    return {dashboard:'시스템 준비 상태', cameras:'카메라 관리', persons:'인물 관리', live:'Live Search', logs:'로그', settings:'기능 설정'}[this.view() as 'dashboard' | 'cameras' | 'persons' | 'live' | 'logs' | 'settings'];
   }
 
   login() {
@@ -235,6 +241,7 @@ export class AppComponent implements OnDestroy {
 
   refreshPage() {
     if (this.busy()) return;
+    if (this.view() === 'logs' || this.view() === 'settings') {if (this.view() === 'logs') this.refresh(); this.controlsRefresh.update(value => value + 1); return;}
     if (this.view() === 'person-editor') this.applyRoute();
     else { this.refresh(); this.refreshAnalysis(); }
   }

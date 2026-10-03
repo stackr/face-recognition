@@ -340,6 +340,7 @@ quality score:
 0.0 ~ 1.0
 quality가 threshold보다 낮으면 ArcFace embedding을 생성하지 않는다.
 Track 중 가장 좋은 얼굴을 best face로 유지한다.
+best face는 대표 썸네일용으로 유지하고, 비교에는 최근 품질 통과 사진을 기본 최대 5장 사용한다. 이후 사진은 기존 best보다 품질이 낮아도 비교 대상에 포함한다.
 
 ---
 
@@ -351,6 +352,7 @@ embedding을 생성한다.
 가능하면 512-dimensional embedding을 사용한다.
 embedding은 L2 normalize한다.
 cosine similarity를 사용한다.
+영상의 같은 추적에서는 사진별 인물 점수를 품질에 따라 평균하고, 평균과 최소 2장의 개별 점수가 모두 기준을 충족할 때 후보로 표시한다. 영상 세션·추적 만료와 큰 특징 변화에서 이전 사진을 비운다.
 
 ---
 
@@ -1021,3 +1023,9 @@ Phase 6 검증 후 다음 개발 범위는 Phase 7 전체 Live Search UI로 정�
 2026-10-03 Phase 7 Angular Live Search UI: 왼쪽 조회 가능한 CCTV 목록/이름·위치 검색, 중앙 인증된 영상/person bbox/track ID/추적별 후보 강조·후보 수 및 분석 조작, 오른쪽 실시간 MatchEvent/현재 등록 얼굴·검출 얼굴 비교와 확인·거부를 제공한다. 카메라 범위/인물 이름/상태 필터는 최근 100건의 표시만 바꾸며 WebSocket/HTTP 변경 cursor 복구를 유지한다. 큰 화면의 3열과 390 px 모바일, `#/live/{camera_id}`의 직접 진입·새로고침·뒤로 가기 복원, 만료·삭제 사진 안내와 로그인 이후 늦은 응답 차단을 구현했다. 현재 계정의 can_view/can_operate를 카메라 API에 추가하여 목록·조작 버튼을 표시하고 기존 서버 grant/CSRF 검사를 유지한다. backend만 재시작하여 Phase 7 서비스 반영을 확인했고 worker/GPU/모델/DB migration/의존성은 변경하지 않았다. 인물 관리 메뉴의 마지막 위치와 기존 크롭/등록 흐름을 유지한다. backend 96건, 실제 DB 통합 1건과 frontend 논리 16건·타입 검사·Angular production build·Ruff를 통과했다. 전체 Chrome 8건을 실패/건너뜀/재시도 없이 통과하여 실제 CUDA 후보·두 사진·필터·카메라 전환·URL 복원·모바일·로그아웃을 검증했다. 시험 전후 기존 카메라 2개·인물 3명·얼굴 2개·계정 1개의 ID와 카메라 실행 상태가 일치했고 임시 자료를 정리했다. 최종 결과는 data/reports/phase7-regression.json에 status=passed로 저장했으며 자세한 결과는 [Phase 7 결과](docs/phase7-report.md)에 기록했다.
 
 다음 개발 범위는 Phase 8 이벤트 전후 영상 클립이다. 비상업 시험 목적과 기존 모델 이용 조건을 유지한다.
+
+2026-10-03 사용자 요청에 따른 얼굴 분석 개선: 왼쪽 [로그]·[기능 설정] 메뉴와 전용 페이지를 추가하고 인물 관리는 마지막에 유지한다. 인물별 검사 시각·카메라/세션/추적/프레임, 제외 사유, 품질과 비교 결과를 MariaDB에 기록하며 필터·주요 사유 집계·cursor 조회를 제공한다. 사진·특징·인물 이름·RTSP 주소는 로그에 저장하지 않으며 기본 7일/100,000건 상한을 적용한다. 관리자는 검출 FPS·얼굴 검사 간격·프레임당 검사 인원을 DB에 저장하고 실행 중인 분석에 반영한다. worker 재시작 복구, 미반영 상태·자동 재시도와 수정 충돌 검사를 제공한다. 머리 영역 우선 SCRFD/전체 영역 fallback/640px 재검사와 최근 최대 5장·품질 가중 평균·최소 2장 기준을 구현했다. 이벤트 사진은 해당 후보를 지지한 프레임에서 선택하고 기존 중복 방지·인증·재연결을 유지한다. 실제 migration head는 `0006_recognition_controls`다. backend 110건+MariaDB 통합 1건, 전체 Chrome 9건, frontend 논리 16건·타입/production build·Ruff를 통과했다. 상세 내용은 [얼굴 분석 개선 결과](docs/recognition-controls-report.md)를 참고한다. 움직이는 인물의 독립 정확도 보정은 후속 평가이며 Phase 8 클립 구현은 아직 진행하지 않았다.
+
+2026-10-03 Live Search 검색 이벤트 삭제: 개별 삭제와 현재 필터에 표시된 삭제 가능 목록(최대 100건)의 삭제를 추가했다. 삭제 확인·취소, 기존 운영/인물 grant·CSRF 검사와 감사 기록, 검출 얼굴·프레임 파일 삭제를 제공한다. 같은 세션·추적·인물의 중복 방지 키를 유지하며, 삭제 journal을 인증된 WebSocket/HTTP cursor로 전달해 다른 화면·새로고침·오프라인 재연결에서도 삭제를 복구한다. 전체 backend 112건+MariaDB 통합 1건, frontend 논리 19건·타입/production build·Ruff 및 관련 Chrome 3건을 통과했다. backend 서비스에 반영했으며 worker/기능 설정/기존 카메라는 변경하지 않았다. 추가 migration 없이 `0006_recognition_controls`를 유지한다. 상세 내용은 [이벤트 삭제 결과](docs/event-deletion-report.md)를 참고한다.
+
+2026-10-03 비교점수 기준 설정: 기능 설정에 `face_match_threshold`(-1~1, 기본 0.75)를 추가하고 DB 저장·실행 중 반영·현재 적용값 표시를 제공한다. 기존 설정 JSON은 환경 기준을 병합하여 이전 값을 유지한다. Live Search의 보관 사진 점수 재판정, 신규 이벤트 저장과 인물 관리 사진 시험 비교에 같은 기준을 사용하며 기존 이벤트/세션/추적은 유지한다. 이벤트 저장은 현재 DB 기준을 다시 검사하여 설정 변경 이전의 대기 후보를 처리한다. 전체 backend 116건+MariaDB 통합 1건, frontend 논리 19건·타입/production build·Ruff와 관련 Chrome 3건을 통과했다. 서비스 반영과 기존 설정/데이터 보존을 확인했으며 추가 migration은 없다. 자세한 내용은 [비교점수 설정 결과](docs/match-threshold-report.md)를 참고한다.

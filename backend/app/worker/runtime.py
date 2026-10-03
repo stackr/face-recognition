@@ -299,17 +299,61 @@ class CameraRun:
 
 
 class WorkerRuntime:
-    def __init__(self, settings, detector, face_analyzer=None, gallery=None, events=None):
+    def __init__(
+        self, settings, detector, face_analyzer=None, gallery=None, events=None, sampling_revision=0
+    ):
         self.settings, self.detector = settings, detector
         self.face_analyzer = face_analyzer
         self.gallery = gallery
         self.events = events
+        self.diagnostics = None
+        self.sampling_revision = sampling_revision
+        self.pending_sampling = None
         self.commands = Queue(maxsize=2)
         self.lock = threading.RLock()
         self.runs = OrderedDict()
         self.cancel = threading.Event()
         self.scheduler = threading.Thread(target=self.schedule, daemon=True, name="shared-gpu")
         self.scheduler.start()
+
+    def sampling_status(self):
+        from app.schemas.recognition import SamplingSettings
+
+        with self.lock:
+            return {
+                "revision": self.sampling_revision,
+                "values": SamplingSettings.defaults(self.settings).model_dump(),
+            }
+
+    def queue_sampling(self, revision, values):
+        with self.lock:
+            latest = self.pending_sampling[0] if self.pending_sampling else self.sampling_revision
+            if revision > latest:
+                self.pending_sampling = (revision, values)
+
+    def apply_sampling(self):
+        # Only the shared inference thread mutates sampling controls, between frames.
+        with self.lock:
+            if self.pending_sampling is None:
+                return
+            revision, values = self.pending_sampling
+            self.pending_sampling = None
+            for name, value in values.model_dump().items():
+                setattr(self.settings, name, value)
+            for run in self.runs.values():
+                with run.lock:
+                    run.next_due = 0
+                    if run.tracker:
+                        run.tracker.fps = values.detection_fps
+                        run.tracker.tracker.max_frames_lost = max(
+                            1, round(self.settings.track_lost_seconds * values.detection_fps)
+                        )
+            if self.face_analyzer:
+                self.face_analyzer.info.setdefault("quality", {}).update(
+                    interval_seconds=values.face_analysis_interval,
+                    max_rois_per_frame=values.face_rois_per_frame,
+                )
+            self.sampling_revision = revision
 
     def start(self, camera_id, source, source_type, loop):
         with self.lock:
@@ -371,6 +415,7 @@ class WorkerRuntime:
 
     def schedule(self):
         while not self.cancel.is_set():
+            self.apply_sampling()
             try:
                 future, content = self.commands.get_nowait()
             except Empty:
@@ -482,6 +527,15 @@ class WorkerRuntime:
                                 gallery_revision,
                                 time.monotonic(),
                             )
+                        if self.diagnostics is not None:
+                            self.diagnostics.submit_tracks(
+                                run.camera_id,
+                                frame.stream_session_id,
+                                frame,
+                                tracks,
+                                self.sampling_revision,
+                                search_status,
+                            )
                         run.result = {
                             "stream_session_id": frame.stream_session_id,
                             "frame_id": frame.frame_id,
@@ -540,5 +594,7 @@ class WorkerRuntime:
             future.cancel()
         if self.gallery:
             self.gallery.close()
+        if self.diagnostics:
+            self.diagnostics.close()
         if self.events:
             self.events.close()

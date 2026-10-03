@@ -10,6 +10,7 @@ const compiled = ts.transpileModule(source, {compilerOptions:{target:ts.ScriptTa
   .replace(/from ['"]([^'"]+)['"]/g, (_, name) => `from '${import.meta.resolve(name)}'`);
 const {EventFeed, filterEvents, registeredFaceUrl} = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`);
 const item = (event_id, change_id = event_id, status = 'candidate') => ({type:'person_match', event_id, change_id, status});
+const deletion = (event_id, change_id) => ({type:'event_deleted', event_id, change_id});
 const turn = () => new Promise(resolve => setImmediate(resolve));
 
 test('Live Search combines camera, normalized person name and review status without changing the recovery feed', () => {
@@ -67,6 +68,55 @@ test('event IDs coalesce duplicates and older updates cannot undo review', async
     c.sockets[0].emit(item(1,3,'confirmed')); c.sockets[0].emit(item(1,2)); c.sockets[0].emit(item(1,3,'confirmed'));
     assert.equal(c.rows().length,1); assert.equal(c.rows()[0].status,'confirmed');
     assert.equal(c.rows()[0].change_id,3);
+  } finally {c.feed.stop();}
+});
+
+test('deletion is final across delayed WS updates and a fresh snapshot', async () => {
+  let deleted = false;
+  const c = setup(async path => path.includes('latest')
+    ? {items:deleted ? [item(2)] : [item(2),item(1)],change_cursor:deleted ? 5 : 2}
+    : {items:[],next_cursor:deleted ? 5 : 2,has_more:false});
+  try {
+    await c.feed.sync(true);
+    c.sockets[0].emit(deletion(1,4));
+    c.sockets[0].emit(item(1,3,'confirmed')); c.sockets[0].emit(item(1,5));
+    assert.deepEqual(c.rows().map(row => row.event_id),[2]);
+    deleted = true; await c.feed.sync(true);
+    c.sockets[0].emit(item(1,3));
+    assert.deepEqual(c.rows().map(row => row.event_id),[2]);
+  } finally {c.feed.stop();}
+});
+
+test('local deletion fences a pending stale snapshot and buffered evidence', async () => {
+  let resolveSnapshot;
+  const c = setup(path => path.includes('latest')
+    ? new Promise(resolve => {resolveSnapshot=resolve;})
+    : Promise.resolve({items:[],next_cursor:2,has_more:false}));
+  try {
+    const pending = c.feed.sync(true);
+    c.feed.update(deletion(1,2));
+    c.sockets[0].emit(item(1));
+    resolveSnapshot({items:[item(1)],change_cursor:1}); await pending;
+    assert.deepEqual(c.rows(),[]);
+  } finally {c.feed.stop();}
+});
+
+test('HTTP recovery removes an event deleted while this browser was offline', async () => {
+  let offlineDeleted = false;
+  const paths = [];
+  const c = setup(async path => {
+    paths.push(path);
+    if (path.includes('latest')) return {items:[item(1)],change_cursor:1};
+    return {items:offlineDeleted ? [deletion(1,2)] : [],next_cursor:offlineDeleted ? 2 : 1,has_more:false};
+  });
+  try {
+    await c.feed.sync(true); offlineDeleted=true;
+    c.sockets[0].close();
+    await new Promise(resolve => setTimeout(resolve,1100));
+    c.sockets[1].emit({type:'ready'}); await turn();
+    assert.deepEqual(c.rows(),[]);
+    assert.equal(paths.filter(path => path.includes('latest')).length,1);
+    assert.ok(paths.at(-1).includes('after_change_id=1'));
   } finally {c.feed.stop();}
 });
 

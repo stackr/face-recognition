@@ -29,6 +29,7 @@ from app.models import (
     CameraPermission,
     EventChange,
     EventState,
+    FunctionSettings,
     GalleryState,
     MatchEvent,
     Person,
@@ -169,6 +170,89 @@ def test_cooldown_improvement_and_review_keep_one_coherent_event(event_context):
         assert db.scalar(select(func.count()).select_from(AuditLog)) == 1
 
 
+def test_event_deletion_removes_images_recovers_offline_and_prevents_recreation(event_context):
+    c = event_context
+    c.store.record(c.candidate)
+    with Session(c.engine) as db:
+        admin = db.get(User, 1)
+        original = db.get(MatchEvent, 1)
+        paths = [original.face_image_path, original.frame_image_path]
+        deleted = c.store.delete([1], admin)
+        assert deleted == [{"type": "event_deleted", "event_id": 1, "change_id": 2}]
+        assert c.store.delete([1, 1], admin) == deleted
+    assert all(not c.store.path(name).exists() for name in paths)
+    # Better evidence from the same ongoing track must not resurrect the deleted ID.
+    assert c.store.record(replace(c.candidate, quality=0.99, similarity=0.99)) is None
+    with Session(c.engine) as db:
+        admin = db.get(User, 1)
+        assert not c.store.page(db, admin)["items"]
+        assert not c.store.page(db, admin, latest=True)["items"]
+        assert c.store.page(db, admin, after_change_id=1)["items"] == deleted
+        assert c.store.page(db, admin, after_change_id=0, limit=1)["has_more"]
+        for action in (
+            lambda: c.store.find(db, admin, 1),
+            lambda: c.store.review(1, admin, "confirmed"),
+        ):
+            with pytest.raises(HTTPException) as unavailable:
+                action()
+            assert unavailable.value.status_code == 404
+        assert db.get(EventState, 1).revision == 2
+        assert db.scalar(select(func.count()).select_from(AuditLog)) == 1
+    # A new stream session is a distinct detection, and remains eligible.
+    assert c.store.record(replace(c.candidate, stream_session_id="b" * 32)) == 2
+    with Session(c.engine) as db:
+        assert [row["event_id"] for row in c.store.page(db, db.get(User, 1))["items"]] == [2]
+        db.get(MatchEvent, 1).expires_at = utc_now() - timedelta(seconds=1)
+        db.commit()
+    c.store.cleanup()
+    with Session(c.engine) as db:
+        assert db.get(MatchEvent, 1) is None
+        assert db.get(EventChange, 2) is None
+
+
+def test_batch_deletion_is_atomic_and_tombstones_recheck_current_grants(event_context):
+    c = event_context
+    c.store.record(c.candidate)
+    with Session(c.engine) as db:
+        db.add(Camera(id=2, name="other-camera", rtsp_url_encrypted="unused"))
+        db.commit()
+    c.store.record(replace(c.candidate, camera_id=2))
+    grant(c, operate=True)
+    with Session(c.engine) as db:
+        operator = db.get(User, 2)
+        with pytest.raises(HTTPException) as denied:
+            c.store.delete([1, 2], operator)
+        assert denied.value.status_code == 404
+        assert db.get(MatchEvent, 1).status == "candidate"
+        assert len(list(c.settings.event_dir.glob("*.jpg"))) == 4
+        assert db.get(EventState, 1).revision == 2
+        db.get(CameraPermission, (1, 2)).can_operate = False
+        db.commit()
+        with pytest.raises(HTTPException) as denied:
+            c.store.delete([1], operator)
+        assert denied.value.status_code == 403
+        assert not c.store.page(db, operator)["items"][0]["can_delete"]
+    grant(c, operate=True)
+    grant(c, operate=True, user_id=3)
+    with Session(c.engine) as db:
+        with pytest.raises(HTTPException) as denied:
+            c.store.delete([1], db.get(User, 3))
+        assert denied.value.status_code == 403
+        c.store.delete([1], db.get(User, 2))
+    app = SimpleNamespace(state=SimpleNamespace(engine=c.engine, events=c.store))
+    assert routes.socket_data(app, "token-2", 1)[1]["type"] == "event_deleted"
+    with Session(c.engine) as db:
+        assert (
+            c.store.page(db, db.get(User, 2), after_change_id=2)["items"][0]["type"]
+            == "event_deleted"
+        )
+        db.delete(db.get(PersonPermission, (1, 2)))
+        db.commit()
+    assert routes.socket_data(app, "token-2", 1)[1] is None
+    with Session(c.engine) as db:
+        assert not c.store.page(db, db.get(User, 2), after_change_id=2)["items"]
+
+
 @pytest.mark.parametrize("invalid", ["revision", "person", "face", "camera", "threshold"])
 def test_stale_deleted_disabled_expired_and_low_score_candidates_fail_closed(
     event_context, invalid
@@ -187,12 +271,25 @@ def test_stale_deleted_disabled_expired_and_low_score_candidates_fail_closed(
         else:
             candidate = replace(candidate, similarity=0.5)
         db.commit()
-    if invalid == "threshold":
-        with pytest.raises(ValueError):
-            c.store.record(candidate)
-    else:
-        assert c.store.record(candidate) is None
+    assert c.store.record(candidate) is None
     assert not list(c.settings.event_dir.glob("*.jpg"))
+
+
+def test_event_save_checks_saved_threshold_even_with_stale_worker_settings(event_context):
+    c = event_context
+    with Session(c.engine) as db:
+        db.add(FunctionSettings(id=1, revision=1, values={"face_match_threshold": 0.6}))
+        db.commit()
+    # Lowered criteria must accept eligible scores even when this process still
+    # holds the old environment threshold. Stricter criteria reject queued work.
+    assert c.store.record(replace(c.candidate, similarity=0.7)) == 1
+    with Session(c.engine) as db:
+        row = db.get(FunctionSettings, 1)
+        row.values, row.revision = {"face_match_threshold": 0.95}, 2
+        db.commit()
+    assert c.store.record(replace(c.candidate, track_id=2, similarity=0.9)) is None
+    assert c.store.record(replace(c.candidate, track_id=2, similarity=0.96)) == 2
+    assert len(list(c.settings.event_dir.glob("*.jpg"))) == 4
 
 
 def test_file_failure_rolls_back_ids_tracks_and_partial_files(event_context, monkeypatch):
@@ -418,6 +515,10 @@ def test_http_event_routes_auth_csrf_images_grants_and_review(event_context, mon
             assert (await client.get("/api/events?latest=true")).json()["change_cursor"] == 1
             assert (await client.get("/api/events/1/face")).content == c.candidate.face_jpeg
             assert (await client.post("/api/events/1/confirm")).status_code == 403
+            assert (await client.delete("/api/events/1")).status_code == 403
+            assert (
+                await client.post("/api/events/delete", json={"event_ids": [1]})
+            ).status_code == 403
             headers = {
                 "X-CSRF-Token": csrf_token("token-1", c.settings.session_secret.get_secret_value())
             }
@@ -435,6 +536,12 @@ def test_http_event_routes_auth_csrf_images_grants_and_review(event_context, mon
             assert (
                 await client.post("/api/events/1/reject", headers=viewer_headers)
             ).status_code == 403
+            assert (await client.delete("/api/events/1", headers=viewer_headers)).status_code == 403
+            assert (
+                await client.post(
+                    "/api/events/delete", json={"event_ids": [1]}, headers=viewer_headers
+                )
+            ).status_code == 403
             with Session(c.engine) as db:
                 db.delete(db.get(PersonPermission, (1, 3)))
                 db.commit()
@@ -449,6 +556,24 @@ def test_http_event_routes_auth_csrf_images_grants_and_review(event_context, mon
                     headers={"X-Service-Token": c.settings.service_token.get_secret_value()},
                 )
             ).status_code == 200
+            client.cookies.set(COOKIE_NAME, "token-1")
+            for ids in ([], [1] * 101, [True], [0], ["1"]):
+                assert (
+                    await client.post(
+                        "/api/events/delete", json={"event_ids": ids}, headers=headers
+                    )
+                ).status_code == 422
+            c.store.record(replace(c.candidate, track_id=2))
+            deletion = await client.delete("/api/events/1", headers=headers)
+            assert deletion.json() == {"type": "event_deleted", "event_id": 1, "change_id": 4}
+            for path in ("/api/events/1", "/api/events/1/face", "/api/events/1/frame"):
+                assert (await client.get(path)).status_code == 404
+            deleted = await client.post(
+                "/api/events/delete", json={"event_ids": [1, 2]}, headers=headers
+            )
+            assert deleted.status_code == 200
+            assert [row["event_id"] for row in deleted.json()["items"]] == [1, 2]
+            assert not (await client.get("/api/events?latest=true")).json()["items"]
 
     asyncio.run(run())
 
@@ -503,6 +628,11 @@ def test_websocket_handshake_delivery_and_origin_auth(
             app.state.event_broker.publish(1)
             delivered = json.loads((await asyncio.wait_for(outgoing.get(), 1))["text"])
             assert delivered["event_id"] == 1 and delivered["status"] == "candidate"
+            with Session(c.engine) as db:
+                c.store.delete([1], db.get(User, 1))
+            app.state.event_broker.publish(1)
+            deleted = json.loads((await asyncio.wait_for(outgoing.get(), 1))["text"])
+            assert deleted == {"type": "event_deleted", "event_id": 1, "change_id": 2}
             await incoming.put({"type": "websocket.disconnect", "code": 1000})
         else:
             assert first["type"] == "websocket.close" and first["code"] == 1008

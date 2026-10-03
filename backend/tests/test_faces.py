@@ -71,9 +71,19 @@ def test_person_roi_coordinates_ambiguity_and_tiny_face_skip_pose(app_context):
             ]
             self.pose_calls = 0
 
-        def detect(self, image):
-            assert image.shape == (200, 160, 3)
-            return self.detected
+        def detect(self, image, side=320):
+            assert side in {320, 640}
+            if image.shape[:2] == (110, 176):
+                offset = np.array([12, 30])
+            else:
+                assert image.shape == (200, 160, 3)
+                offset = np.array([20, 40])
+            delta = np.array([20, 40]) - offset
+            return [
+                face
+                | {"bbox": face["bbox"] + np.tile(delta, 2), "landmarks": face["landmarks"] + delta}
+                for face in self.detected
+            ]
 
         def pose(self, image, bbox):
             self.pose_calls += 1
@@ -151,7 +161,7 @@ def test_face_sampling_quality_gate_best_face_expiry_and_bounded_fairness(app_co
     analyzer.accept = True
     assert cache.process(analyzer, sample_frame(10.2), people(), {1})["roi_attempts"] == 0
     assert cache.process(analyzer, sample_frame(10.6), people(), {1})["embeddings_created"] == 1
-    assert cache.process(analyzer, sample_frame(11.2), people(), {1})["embeddings_created"] == 0
+    assert cache.process(analyzer, sample_frame(11.2), people(), {1})["embeddings_created"] == 1
     analyzer.score = 0.9
     assert cache.process(analyzer, sample_frame(11.8), people(), {1})["embeddings_created"] == 1
     assert cache.thumbnail(1, "a" * 32, 11.9)[:2] == b"\xff\xd8"

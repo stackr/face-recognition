@@ -1,0 +1,29 @@
+@if (error()) {<div class="alert alert-danger" role="alert">{{ error() }}</div>}
+<form class="card log-filters" (ngSubmit)="applyFilters()">
+  <div class="log-filter-fields">
+    <div><label for="log-camera" class="form-label">로그 카메라</label><select id="log-camera" name="log-camera" class="form-select" [(ngModel)]="filters.camera_id"><option value="">접근 가능한 전체 카메라</option>@for (camera of cameras; track camera.camera_id) {@if (camera.can_view) {<option [value]="camera.camera_id">{{ camera.name }}</option>}}</select></div>
+    <div><label for="log-outcome" class="form-label">검사 결과</label><select id="log-outcome" name="log-outcome" class="form-select" [(ngModel)]="filters.outcome"><option value="">전체 결과</option>@for (item of outcomes; track item[0]) {<option [value]="item[0]">{{ item[1] }}</option>}</select></div>
+    <div><label for="log-reason" class="form-label">주요 제외 사유</label><select id="log-reason" name="log-reason" class="form-select" [(ngModel)]="filters.reason"><option value="">전체 사유</option>@for (item of reasons; track item[0]) {<option [value]="item[0]">{{ item[1] }}</option>}</select></div>
+    <div><label for="log-start" class="form-label">시작 시각</label><input id="log-start" name="log-start" type="datetime-local" class="form-control" [(ngModel)]="filters.start"></div>
+    <div><label for="log-end" class="form-label">종료 시각</label><input id="log-end" name="log-end" type="datetime-local" class="form-control" [(ngModel)]="filters.end"></div>
+  </div>
+  <div class="log-actions"><button class="btn btn-primary" type="submit" [disabled]="loading()">조회</button><button class="btn btn-outline-secondary" type="button" (click)="reset()" [disabled]="loading()">필터 초기화</button><label class="form-check ms-auto"><input type="checkbox" name="log-auto" class="form-check-input" [(ngModel)]="autoRefresh"><span class="form-check-label">최신 페이지 자동 갱신 (5초)</span></label></div>
+</form>
+@if (page(); as logs) {
+  <section class="card log-summary"><h2>검색 조건의 검사 결과</h2><div class="log-counts"><strong>전체 {{ logs.summary.total | number }}건</strong>@for (item of outcomes; track item[0]) {<span>{{ item[1] }} <b>{{ logs.summary.outcomes[item[0]] || 0 | number }}</b></span>}</div>
+    <details class="mt-3"><summary>주요 제외 사유별 집계</summary><div class="log-counts mt-2">@for (item of reasonSummary(); track item[0]) {<span>{{ reasonLabel(item[0]) }} <b>{{ item[1] | number }}</b></span>} @empty {<span>제외 기록이 없습니다.</span>}</div><small>여러 사유가 있으면 첫 번째 사유로 집계합니다. 개별 기록에는 모든 사유를 표시합니다.</small></details>
+  </section>
+  <section class="card recognition-log-list"><div class="log-list-heading"><h2>얼굴 검사 로그</h2><span>{{ loading() ? '불러오는 중…' : pageNumber + ' 페이지' }}</span></div>
+    <div class="table-responsive"><table class="table recognition-log-table align-middle"><thead><tr><th>검사 시각</th><th>카메라 / 추적</th><th>결과 / 제외 사유</th><th>품질</th><th>비교 점수</th><th>비교 사진</th><th>세부 정보</th></tr></thead><tbody>
+      @for (item of logs.items; track item.id) {
+        <tr><td class="text-nowrap">{{ item.captured_at | date:'MM-dd HH:mm:ss.SSS' }}</td><td><strong>{{ item.camera_name }}</strong><small class="d-block">추적 #{{ item.track_id }} · 프레임 {{ item.frame_id }}</small></td>
+          <td><span class="badge" [class.text-bg-success]="item.outcome === 'matched'" [class.text-bg-secondary]="item.outcome !== 'matched'">{{ outcomeLabel(item.outcome) }}</span>@for (reason of item.reasons; track reason) {<small class="d-block mt-1">{{ reasonLabel(reason) }}</small>}</td>
+          <td>{{ item.quality | number:'1.3-3' }}</td><td>{{ item.top_similarity === null ? '—' : (item.top_similarity | number:'1.3-3') }}</td><td>{{ item.sample_count }}장</td>
+          <td><details><summary>상세</summary><dl class="log-metrics"><dt>기록 번호</dt><dd>{{ item.id }}</dd><dt>얼굴 크기</dt><dd>{{ item.metrics.face_size?.join(' × ') || '—' }} px</dd><dt>선명도</dt><dd>{{ item.metrics.blur_score ?? '—' }}</dd><dt>밝기</dt><dd>{{ item.metrics.brightness ?? '—' }}</dd><dt>좌우 / 상하 / 기울기</dt><dd>{{ item.metrics.yaw ?? '—' }} / {{ item.metrics.pitch ?? '—' }} / {{ item.metrics.roll ?? '—' }}°</dd><dt>검출 영역 / 입력</dt><dd>{{ item.metrics.detector_region === 'head' ? '머리' : item.metrics.detector_region === 'person' ? '사람 전체' : '—' }} / {{ item.metrics.detector_input ?? '—' }} px</dd><dt>검출 횟수</dt><dd>{{ item.metrics.detection_passes ?? '—' }}</dd><dt>비교 기준</dt><dd>{{ item.metrics.threshold ?? '—' }}</dd><dt>기준 이상 사진 / 최소</dt><dd>{{ item.metrics.supporting_samples ?? '—' }} / {{ item.metrics.minimum_samples ?? '—' }}장</dd><dt>설정 버전</dt><dd>{{ item.settings_revision }}</dd><dt>영상 세션</dt><dd>{{ item.stream_session_id }}</dd></dl></details></td>
+        </tr>
+      } @empty {<tr><td colspan="7" class="empty-state">조건에 맞는 얼굴 검사 로그가 없습니다.<small class="d-block">Live Search에서 분석을 시작하면 검사 결과가 기록됩니다.</small></td></tr>}
+    </tbody></table></div>
+    <div class="log-actions"><button class="btn btn-outline-secondary" (click)="previous()" [disabled]="loading() || pageNumber === 1">앞 페이지</button><button class="btn btn-outline-secondary" (click)="next()" [disabled]="loading() || !logs.has_more">이전 기록</button><button class="btn btn-outline-primary ms-auto" (click)="latest()" [disabled]="loading()">최신 기록</button></div>
+    <small class="text-secondary mt-3">로그는 최근 {{ logs.retention_days }}일, 최대 {{ logs.max_records | number }}건을 보관합니다. 사진과 얼굴 특징은 이 로그에 저장하지 않습니다.</small>
+  </section>
+} @else if (loading()) {<p role="status">로그를 불러오고 있습니다.</p>}

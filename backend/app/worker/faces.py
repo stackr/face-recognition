@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import cv2
 import numpy as np
 
+from app.schemas.recognition import sample_window
 from app.worker.face_onnx import MODEL_VERSION, align_face, normalized_embedding
 
 
@@ -133,22 +134,56 @@ class FaceAnalyzer:
         x2, y2 = np.ceil(np.minimum(person_bbox[2:], [width, height])).astype(int)
         if x2 <= x1 or y2 <= y1:
             return FaceCandidate({"status": "no_face", "reasons": ["no_face"], "quality": 0})
+        # Preserve the original person association boundary even with crop padding.
+        person = (x1, y1, x2, y2)
+        pw, ph = x2 - x1, y2 - y1
+        head = (
+            max(0, x1 - round(pw * 0.05)),
+            max(0, y1 - round(ph * 0.05)),
+            min(width, x2 + round(pw * 0.05)),
+            min(height, y1 + round(ph * 0.5)),
+        )
+        candidate = self.inspect_region(image, person, head, 320, "head", 1)
+        if candidate.metadata["status"] in {"accepted", "ambiguous"}:
+            return candidate
+        retry_reasons = {"face_too_small", "face_clipped", "landmark_geometry"}
+        if candidate.metadata["status"] != "no_face" and not retry_reasons.intersection(
+            candidate.metadata["reasons"]
+        ):
+            return candidate
+        candidate = self.inspect_region(image, person, person, 320, "person", 2)
+        if candidate.metadata["status"] == "no_face" or retry_reasons.intersection(
+            candidate.metadata["reasons"]
+        ):
+            candidate = self.inspect_region(image, person, person, 640, "person", 3)
+        return candidate
+
+    def inspect_region(self, image, person, region, side, name, passes):
+        x1, y1, x2, y2 = region
+        px1, py1, px2, py2 = person
         roi = image[y1:y2, x1:x2]
-        detected = self.models.detect(roi)
+        detected = self.models.detect(roi, side=side)
+        details = {"detector_region": name, "detector_input": side, "detection_passes": passes}
         eligible = []
         for face in detected:
             bbox = face["bbox"]
-            center = (bbox[:2] + bbox[2:]) / 2
+            center = (bbox[:2] + bbox[2:]) / 2 + [x1, y1]
             # A lower-body/neighbor face is not assigned to this person's track.
-            if 0 <= center[0] <= roi.shape[1] and 0 <= center[1] <= roi.shape[0] * 0.65:
+            if px1 <= center[0] <= px2 and py1 <= center[1] <= py1 + (py2 - py1) * 0.65:
                 eligible.append(face)
         if not eligible:
-            return FaceCandidate({"status": "no_face", "reasons": ["no_face"], "quality": 0})
+            return FaceCandidate(
+                {"status": "no_face", "reasons": ["no_face"], "quality": 0} | details
+            )
         if len(eligible) > 1:
             return FaceCandidate(
-                {"status": "ambiguous", "reasons": ["multiple_faces"], "quality": 0}
+                {"status": "ambiguous", "reasons": ["multiple_faces"], "quality": 0} | details
             )
         face = eligible[0]
+        if np.any(face["bbox"][:2] < 0) or np.any(face["bbox"][2:] > [roi.shape[1], roi.shape[0]]):
+            return FaceCandidate(
+                {"status": "rejected", "reasons": ["face_clipped"], "quality": 0} | details
+            )
         face = face | {
             "bbox": face["bbox"] + [x1, y1, x1, y1],
             "landmarks": face["landmarks"] + [x1, y1],
@@ -157,7 +192,9 @@ class FaceAnalyzer:
         pose = None
         if min(face["bbox"][2:] - face["bbox"][:2]) >= self.settings.face_min_size:
             pose = self.models.pose(image, face["bbox"])
-        return quality(image, face, self.settings, pose)
+        candidate = quality(image, face, self.settings, pose)
+        candidate.metadata.update(details)
+        return candidate
 
     def embed(self, aligned):
         return self.models.embed(aligned)
@@ -190,6 +227,7 @@ class TrackFaces:
                 key: value
                 for key, value in self.tracks.items()
                 if key in live_ids
+                and value["stream_session_id"] == frame.stream_session_id
                 and frame.captured_mono - value["last_seen_mono"]
                 <= self.settings.track_lost_seconds
             }
@@ -206,8 +244,27 @@ class TrackFaces:
                         "last_seen_at": frame.captured_at,
                         "current": {"status": "pending", "quality": 0, "reasons": []},
                         "best": None,
+                        "samples": [],
+                        "stream_session_id": frame.stream_session_id,
                     }
                 if key in self.tracks:
+                    state = self.tracks[key]
+                    retained = [
+                        sample
+                        for sample in state["samples"]
+                        if sample["stream_session_id"] == frame.stream_session_id
+                        and frame.captured_mono - sample["captured_mono"]
+                        <= sample_window(self.settings)
+                    ]
+                    state["samples"] = retained
+                    if not retained:
+                        state["match_samples"] = {}
+                        state["matches"] = []
+                        state.pop("match_key", None)
+                        state.pop("comparison", None)
+                    state["best"] = max(
+                        retained, key=lambda sample: sample["quality"], default=None
+                    )
                     self.tracks[key].update(
                         last_seen_mono=frame.captured_mono, last_seen_at=frame.captured_at
                     )
@@ -234,14 +291,11 @@ class TrackFaces:
                     "frame_id": frame.frame_id,
                     "captured_at": frame.captured_at,
                 }
-                best_score = state["best"]["quality"] if state["best"] else -1
             if candidate.metadata["status"] != "accepted":
                 counts["quality_rejected"] += 1
                 continue
             counts["quality_accepted"] += 1
-            if candidate.metadata["quality"] <= best_score:
-                continue
-            # This is the only live path that calls ArcFace: qualified, improved face.
+            # Qualified later faces are compared even when their quality is lower.
             vector = normalized_embedding(analyzer.embed(candidate.aligned))
             ok, jpeg = cv2.imencode(".jpg", candidate.aligned, [cv2.IMWRITE_JPEG_QUALITY, 90])
             if not ok:
@@ -258,7 +312,16 @@ class TrackFaces:
                     raise RuntimeError("Event frame encoding failed")
                 event_frame_jpeg = frame_jpeg.tobytes()
             with self.lock:
-                state["best"] = {
+                if (
+                    state["samples"]
+                    and max(float(previous["embedding"] @ vector) for previous in state["samples"])
+                    < self.settings.face_track_consistency_threshold
+                ):
+                    # An abrupt identity change must not inherit earlier consensus.
+                    state["samples"] = []
+                    state.pop("match_key", None)
+                    counts["sample_resets"] += 1
+                sample = {
                     "quality": candidate.metadata["quality"],
                     "embedding": vector,
                     "jpeg": jpeg.tobytes(),
@@ -267,7 +330,11 @@ class TrackFaces:
                     "captured_at": frame.captured_at,
                     "stream_session_id": frame.stream_session_id,
                     "model_version": MODEL_VERSION,
+                    "captured_mono": frame.captured_mono,
                 }
+                state["samples"].append(sample)
+                state["samples"] = state["samples"][-self.settings.face_sample_count :]
+                state["best"] = max(state["samples"], key=lambda sample: sample["quality"])
             counts["embeddings_created"] += 1
         counts["analysis_frames"] = int(bool(due))
         with self.lock:
@@ -288,6 +355,7 @@ class TrackFaces:
                 )
                 track["face"] = state["current"] | {
                     "embedding_ready": best is not None,
+                    "sample_count": len(state["samples"]),
                     "best": {
                         key: best[key]
                         for key in ("quality", "frame_id", "captured_at", "model_version")
@@ -310,22 +378,86 @@ class TrackFaces:
         with self.lock:
             for track in tracks:
                 state = self.tracks.get(track["track_id"])
-                best = state["best"] if state else None
+                samples = state["samples"] if state else []
                 face = track.get("face")
-                if not best or face is None:
+                if face is None:
                     continue
-                match_key = (key, best["frame_id"])
+                if not samples:
+                    face["matches"] = []
+                    continue
+                threshold = self.settings.face_match_threshold
+                match_key = (key, threshold, tuple(sample["frame_id"] for sample in samples))
                 if state.get("match_key") != match_key:
-                    result = gallery.search(
-                        best["embedding"], limit=self.settings.max_target_persons
-                    )
+                    scored = []
+                    for sample in samples:
+                        if sample.get("search_key") != key:
+                            sample["search"] = gallery.search(
+                                sample["embedding"], limit=self.settings.max_target_persons
+                            )
+                            sample["search_key"] = key
+                        scored.append(sample["search"])
+                    weights = [max(sample["quality"], 0.01) for sample in samples]
+                    persons = {}
+                    for result in scored:
+                        for item in result["matches"]:
+                            persons[item["person_id"]] = item
+                    combined, evidence = [], {}
+                    for person_id, item in persons.items():
+                        matches = [
+                            next(
+                                (
+                                    match
+                                    for match in result["matches"]
+                                    if match["person_id"] == person_id
+                                ),
+                                None,
+                            )
+                            for result in scored
+                        ]
+                        scores = [match["similarity"] if match else -1 for match in matches]
+                        score = float(np.average(scores, weights=weights))
+                        supporting = [
+                            sample
+                            for sample, value, match in zip(samples, scores, matches, strict=True)
+                            if match is not None and value >= threshold
+                        ]
+                        combined.append(
+                            item | {"similarity": score, "supporting_samples": len(supporting)}
+                        )
+                        if supporting:
+                            chosen = max(supporting, key=lambda sample: sample["quality"])
+                            chosen_match = next(
+                                match
+                                for sample, match in zip(samples, matches, strict=True)
+                                if sample is chosen
+                            )
+                            evidence[person_id] = chosen
+                            combined[-1]["face_id"] = chosen_match["face_id"]
+                    combined.sort(key=lambda item: (-item["similarity"], item["person_id"]))
                     state["matches"] = [
                         item
-                        for item in result["matches"]
-                        if item["similarity"] >= result["threshold"]
+                        for item in combined
+                        if item["similarity"] >= threshold and item["supporting_samples"] >= 2
                     ]
+                    state["match_samples"] = evidence
+                    state["comparison"] = {
+                        "outcome": "gallery_empty"
+                        if not persons
+                        else "collecting_samples"
+                        if len(samples) < 2
+                        else "matched"
+                        if state["matches"]
+                        else "insufficient_consensus"
+                        if combined and combined[0]["similarity"] >= threshold
+                        else "below_threshold",
+                        "threshold": threshold,
+                        "top_similarity": combined[0]["similarity"] if combined else None,
+                        "supporting_samples": combined[0]["supporting_samples"] if combined else 0,
+                        "minimum_samples": 2,
+                    }
                     state["match_key"] = match_key
                 face["matches"] = state["matches"]
+                face["comparison"] = state["comparison"]
         return key[0]
 
     def size(self):

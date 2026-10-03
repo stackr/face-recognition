@@ -1,6 +1,7 @@
 import {CommonModule} from '@angular/common';
 import {HttpClient} from '@angular/common/http';
-import {Component, EventEmitter, Input, OnDestroy, OnInit, Output, computed, inject, signal} from '@angular/core';
+import {Component, DestroyRef, EventEmitter, Input, OnDestroy, OnInit, Output, computed, inject, signal} from '@angular/core';
+import {takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {FormsModule} from '@angular/forms';
 import {firstValueFrom, timeout} from 'rxjs';
 
@@ -9,9 +10,11 @@ export interface MatchEvent {
   person_id: number; person_name: string; stream_session_id: string; track_id: number;
   timestamp: string; face_similarity: number; face_quality: number;
   status: 'candidate' | 'confirmed' | 'rejected'; thumbnail_url: string | null; frame_url: string | null;
-  can_review: boolean;
+  can_review: boolean; can_delete: boolean;
 }
-export interface EventPage {items: MatchEvent[]; next_cursor: number; change_cursor?: number; has_more: boolean;}
+export interface EventDeletion {type: 'event_deleted'; event_id: number; change_id: number;}
+export type EventChange = MatchEvent | EventDeletion;
+export interface EventPage {items: EventChange[]; next_cursor: number; change_cursor?: number; has_more: boolean;}
 export interface ReferencePerson {
   id: number; faces: {id: number; quality: number; state: string; image_available: boolean}[];
 }
@@ -43,7 +46,9 @@ export class EventFeed {
   private initialized = false;
   private cursor = 0;
   private rows = new Map<number, MatchEvent>();
-  private buffered: MatchEvent[] = [];
+  private deleted = new Map<number, number>();
+  private snapshotWatermark = 0;
+  private buffered: EventChange[] = [];
   private retry = 0;
   private visibilityVersion = 0;
 
@@ -64,7 +69,7 @@ export class EventFeed {
     this.reconnectTimer = this.refreshTimer = null;
     const socket = this.socket; this.socket = null; socket?.close();
     this.syncing = false; this.initialized = false; this.restartSnapshot = false;
-    this.cursor = 0; this.rows.clear(); this.buffered = []; this.render([]);
+    this.cursor = this.snapshotWatermark = 0; this.rows.clear(); this.deleted.clear(); this.buffered = []; this.render([]);
   }
 
   private connect() {
@@ -81,7 +86,7 @@ export class EventFeed {
         this.visibilityVersion++; this.buffered = []; this.rows.clear(); this.render([]);
         this.restartSnapshot = true; void this.sync(true);
       }
-      else if (value.type === 'person_match') {
+      else if (value.type === 'person_match' || value.type === 'event_deleted') {
         if (this.syncing) {
           if (this.buffered.length >= 128) {this.restartSnapshot = true; socket.close();}
           else this.buffered.push(value);
@@ -104,11 +109,28 @@ export class EventFeed {
     };
   }
 
-  update(row: MatchEvent) {this.apply([row]);}
+  update(row: EventChange) {
+    this.apply([row]);
+    if (this.syncing) {
+      if (this.buffered.length < 128) this.buffered.push(row);
+      else this.restartSnapshot = true;
+    }
+  }
 
-  private apply(values: MatchEvent[]) {
+  private apply(values: EventChange[], snapshot = false) {
     for (const value of values) {
       const previous = this.rows.get(value.event_id);
+      if (value.type === 'event_deleted') {
+        if (!previous || previous.change_id <= value.change_id) {
+          this.deleted.set(value.event_id, Math.max(this.deleted.get(value.event_id) ?? 0, value.change_id));
+          this.rows.delete(value.event_id);
+        }
+        continue;
+      }
+      // Deletion is final for this ID. A fresh snapshot lets us discard old tombstones
+      // while its high-water mark still fences delayed messages for absent rows.
+      if (this.deleted.has(value.event_id)
+        || (!snapshot && !previous && value.change_id <= this.snapshotWatermark)) continue;
       if (!previous || previous.change_id <= value.change_id) this.rows.set(value.event_id, value);
     }
     const sorted = [...this.rows.values()].sort((a, b) => b.event_id - a.event_id).slice(0, 100);
@@ -127,7 +149,11 @@ export class EventFeed {
         this.buffered = [];
         const page = await this.read('/api/events?latest=true&limit=100');
         if (version !== this.generation || visibilityVersion !== this.visibilityVersion || !this.active) return;
-        this.rows.clear(); this.apply(page.items); this.cursor = page.change_cursor ?? 0;
+        this.rows.clear(); this.apply(page.items, true); this.cursor = page.change_cursor ?? 0;
+        this.snapshotWatermark = Math.max(this.snapshotWatermark, this.cursor);
+        for (const [id, revision] of this.deleted) {
+          if (revision <= this.snapshotWatermark) this.deleted.delete(id);
+        }
         this.initialized = true;
       }
       let more = true;
@@ -164,10 +190,13 @@ export class EventFeed {
         <div class="event-person-filter"><label for="event-person">인물 이름</label><input id="event-person" type="search" class="form-control form-control-sm" [ngModel]="filters().person" (ngModelChange)="setFilter('person', $event)" maxlength="120" placeholder="이름으로 검색"></div>
       </div>
       <div class="event-filter-summary"><span>최근 {{ events().length }}건 중 {{ visibleEvents().length }}건 표시</span><button type="button" class="btn btn-sm btn-link" (click)="resetFilters()">필터 초기화</button></div>
+      @if (deletableEvents().length) {
+        <div class="event-list-actions"><button type="button" class="btn btn-sm btn-outline-danger" (click)="deleteVisible()" [disabled]="reviewing() || deleting()">{{ deleting() ? '삭제 중…' : '목록 삭제' }}</button><small>현재 표시된 삭제 가능 이벤트 {{ deletableEvents().length }}건</small></div>
+      }
       @if (error()) {<div class="alert alert-warning" role="alert">{{ error() }}</div>}
       <div class="event-grid">
         @for (event of visibleEvents(); track event.event_id) {
-          <article class="event-card" [class.event-confirmed]="event.status === 'confirmed'" [class.event-rejected]="event.status === 'rejected'">
+          <article class="event-card" [attr.data-event-id]="event.event_id" [class.event-confirmed]="event.status === 'confirmed'" [class.event-rejected]="event.status === 'rejected'">
             <div class="event-details"><div class="event-card-heading"><strong>{{ event.person_name }}</strong><span class="event-status">{{ statusLabel(event.status) }}</span></div>
               <div class="event-photo-pair">
                 <figure><figcaption>현재 등록 얼굴</figcaption>
@@ -183,9 +212,10 @@ export class EventFeed {
               <div class="event-actions">
                 @if (event.frame_url) {<a [href]="event.frame_url" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">검출 프레임</a>}
                 @if (event.can_review) {
-                  <button class="btn btn-sm btn-outline-primary" (click)="review(event, 'confirm')" [disabled]="reviewing() || event.status === 'confirmed'">확인</button>
-                  <button class="btn btn-sm btn-outline-danger" (click)="review(event, 'reject')" [disabled]="reviewing() || event.status === 'rejected'">거부</button>
+                  <button class="btn btn-sm btn-outline-primary" (click)="review(event, 'confirm')" [disabled]="reviewing() || deleting() || event.status === 'confirmed'">확인</button>
+                  <button class="btn btn-sm btn-outline-danger" (click)="review(event, 'reject')" [disabled]="reviewing() || deleting() || event.status === 'rejected'">거부</button>
                 }
+                @if (event.can_delete) {<button type="button" class="btn btn-sm btn-outline-danger" (click)="deleteEvent(event)" [disabled]="reviewing() || deleting()">삭제</button>}
               </div>
             </div>
           </article>
@@ -200,15 +230,18 @@ export class EventPanelComponent implements OnInit, OnDestroy {
   @Input() set references(value: ReferencePerson[]) {this.persons.set(value);}
   @Output() sessionExpired = new EventEmitter<void>();
   private http = inject(HttpClient);
+  private destroyRef = inject(DestroyRef);
   events = signal<MatchEvent[]>([]);
   private cameraId = signal<number | null>(null);
   private persons = signal<ReferencePerson[]>([]);
   private failedImages = signal(new Set<string>());
   filters = signal<EventFilters>({camera: 'selected', person: '', status: 'all'});
   visibleEvents = computed(() => filterEvents(this.events(), this.filters(), this.cameraId()));
+  deletableEvents = computed(() => this.visibleEvents().filter(event => event.can_delete));
   connection = signal('연결 중');
   error = signal('');
   reviewing = signal(false);
+  deleting = signal(false);
   private feed = new EventFeed(path => firstValueFrom(this.http.get<EventPage>(path).pipe(timeout(8000))),
     rows => this.events.set(rows), label => this.connection.set(label), () => this.sessionExpired.emit());
   ngOnInit() {this.feed.start();}
@@ -225,11 +258,37 @@ export class EventPanelComponent implements OnInit, OnDestroy {
     return url && !this.failedImages().has(url) ? url : null;
   }
   statusLabel(status: string) {return ({candidate:'확인 전 후보', confirmed:'운영자 확인', rejected:'운영자 거부'} as Record<string, string>)[status] || status;}
+  deleteEvent(event: MatchEvent) {
+    if (this.reviewing() || this.deleting() || !event.can_delete
+      || !window.confirm(`“${event.person_name}” 검색 이벤트와 검출 사진을 삭제할까요? 삭제 후 복구할 수 없습니다.`)) return;
+    this.deleting.set(true); this.error.set('');
+    this.http.delete<EventDeletion>(`/api/events/${event.event_id}`, {headers:this.requestHeaders})
+      .pipe(timeout(8000), takeUntilDestroyed(this.destroyRef)).subscribe({
+        next: value => {this.feed.update(value); this.deleting.set(false);},
+        error: error => this.deleteFailed(error)
+      });
+  }
+  deleteVisible() {
+    const rows = this.deletableEvents();
+    if (this.reviewing() || this.deleting() || !rows.length
+      || !window.confirm(`현재 필터에 표시된 삭제 가능 이벤트 ${rows.length}건과 검출 사진을 삭제할까요? 삭제 후 복구할 수 없습니다.`)) return;
+    this.deleting.set(true); this.error.set('');
+    this.http.post<{items: EventDeletion[]}>('/api/events/delete', {event_ids:rows.map(event => event.event_id)}, {headers:this.requestHeaders})
+      .pipe(timeout(8000), takeUntilDestroyed(this.destroyRef)).subscribe({
+        next: value => {for (const row of value.items) this.feed.update(row); this.deleting.set(false);},
+        error: error => this.deleteFailed(error)
+      });
+  }
+  private deleteFailed(error: {status?: number}) {
+    this.deleting.set(false);
+    if (error.status === 401) {this.feed.stop(); this.sessionExpired.emit();}
+    else {this.error.set('이벤트를 삭제하지 못했습니다. 접근 권한과 서버 연결을 확인해 주세요.'); void this.feed.sync(true);}
+  }
   review(event: MatchEvent, action: 'confirm' | 'reject') {
-    if (this.reviewing()) return;
+    if (this.reviewing() || this.deleting()) return;
     this.reviewing.set(true); this.error.set('');
     this.http.post<MatchEvent>(`/api/events/${event.event_id}/${action}`, {}, {headers:this.requestHeaders})
-      .pipe(timeout(8000)).subscribe({
+      .pipe(timeout(8000), takeUntilDestroyed(this.destroyRef)).subscribe({
         next: value => {this.feed.update(value); this.reviewing.set(false);},
         error: error => {
           this.reviewing.set(false);

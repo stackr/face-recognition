@@ -51,12 +51,35 @@ def create_worker(
             from app.worker.events import EventWriter
 
             events = EventWriter(settings) if enable_gallery else None
+            revision = 0
+            if events:
+                from sqlalchemy.orm import Session
+
+                from app.services.recognition import load_sampling
+
+                with Session(events.engine) as db:
+                    revision, values = load_sampling(db, settings)
+                for name, value in values.model_dump().items():
+                    setattr(settings, name, value)
+                if active_faces:
+                    active_faces.info.setdefault("quality", {}).update(
+                        interval_seconds=values.face_analysis_interval,
+                        max_rois_per_frame=values.face_rois_per_frame,
+                    )
         except Exception as exc:
             logging.getLogger("cctv.worker").error(
                 "Detector startup failed; type=%s", type(exc).__name__
             )
             raise
-        app.state.runtime = WorkerRuntime(settings, active_detector, active_faces, gallery, events)
+        app.state.runtime = WorkerRuntime(
+            settings, active_detector, active_faces, gallery, events, revision
+        )
+        if events:
+            from app.worker.diagnostics import DiagnosticsWriter
+
+            app.state.runtime.diagnostics = DiagnosticsWriter(
+                settings, events.engine, app.state.runtime
+            )
         logging.getLogger("cctv.worker").info(
             "Worker ready; device=%s model=%s",
             active_detector.info["actual_device"],
@@ -96,7 +119,28 @@ def create_worker(
             "resources": runtime.detector.resources(),
             "cameras": states,
             "events": runtime.events.status() if runtime.events else {"status": "disabled"},
+            "recognition_logs": runtime.diagnostics.status()
+            if runtime.diagnostics
+            else {"status": "disabled"},
+            "sampling": runtime.sampling_status(),
         }
+
+    @app.get("/internal/settings", dependencies=[Depends(authorized)])
+    def sampling(request: Request):
+        return request.app.state.runtime.sampling_status()
+
+    @app.post("/internal/settings/reload", dependencies=[Depends(authorized)])
+    def reload_sampling(request: Request):
+        runtime = request.app.state.runtime
+        if runtime.diagnostics is None:
+            raise HTTPException(503, "Persistent settings unavailable")
+        revision = runtime.diagnostics.reload()
+        deadline = time.monotonic() + 8
+        while runtime.sampling_status()["revision"] < revision:
+            if time.monotonic() >= deadline or runtime.cancel.is_set():
+                raise HTTPException(503, "Settings application pending")
+            time.sleep(0.01)
+        return runtime.sampling_status()
 
     @app.post("/internal/videos/probe", dependencies=[Depends(authorized)])
     def probe(payload: StartInput):

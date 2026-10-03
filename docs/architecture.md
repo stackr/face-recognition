@@ -1,6 +1,6 @@
 # Architecture
 
-비상업 시험용 프로젝트이며 Phase 7 Angular Live Search UI를 구현하고 서비스에 반영했다. Phase 6의 실제 CUDA 파이프라인/이벤트 저장·복구를 유지하며 카메라·영상·이벤트 3열, 사진 비교와 표시 필터를 제공한다. 전체 backend 96건, 실제 MariaDB 통합 1건, Chrome E2E 8건과 frontend 논리 테스트 16건을 통과했다. 실제 Alembic head는 `0005_match_events`다. 자세한 범위는 [Phase 7 결과](phase7-report.md)를 따른다.
+비상업 시험용 프로젝트이며 Phase 7 Live Search에 로그·기능 설정과 얼굴 검출/다중 프레임 비교 개선을 적용했다. Phase 6의 이벤트 저장·중복 방지·인증·재연결 복구를 유지한다. backend 110건, 실제 MariaDB 통합 1건, Chrome E2E 9건과 frontend 논리 테스트 16건을 통과했다. 실제 Alembic head는 `0006_recognition_controls`다. 최신 범위는 [얼굴 분석 개선 결과](recognition-controls-report.md), 기본 화면 구성은 [Phase 7 결과](phase7-report.md)를 따른다.
 
 ## 현재 구현
 
@@ -17,7 +17,10 @@ flowchart LR
     Worker --> YOLO[공유 YOLO11n CUDA detector]
     YOLO --> Tracker[카메라별 ByteTrack]
     Tracker --> Faces[공유 SCRFD / 3D landmark / ArcFace CUDA]
-    Faces --> Quality[품질 gate / track별 최적 얼굴과 512D 특징]
+    Faces --> Quality[품질 gate / 추적별 최근 얼굴과 512D 특징]
+    Quality --> Diagnostics[제한 큐 / 사진 없는 검사 로그]
+    Diagnostics --> DB
+    DB -->|설정 revision / worker polling| Worker
     Quality --> JPEG[박스와 ID를 그린 JPEG cache]
     Quality --> Thumbnail[112x112 얼굴 JPEG cache]
     Thumbnail -->|인증 / 카메라 grant / session 검사| API
@@ -98,19 +101,21 @@ Phase 8의 clip pre-buffer는 압축 segment의 디스크 보관을 우선 검�
 
 현재 1채널 실시간 MP4 benchmark를 제공하며 얼굴 분석 비용을 포함한다. camera별 source/processed FPS, drop 수, queue 크기, inference 시간 및 capture부터 결과 준비까지의 latency를 기록한다. 1→2→4채널로 확대하고 offline 최대 처리량 모드는 실시간 모드와 구분한다. Phase 9는 다중 camera 확장/최적화 단계다.
 
-## Phase 3 얼굴 분석의 상태와 자원
+## 얼굴 분석의 상태와 자원
 
-순차 GPU scheduler는 사람 탐지/추적 후 최소 0.5초 간격으로 해당 person ROI를 얼굴 검사한다. due track을 마지막 검사 시각으로 정렬하여 검사를 배분하고 frame당 4 ROI, camera당 100 face track으로 제한한다. 전체 frame에 매번 얼굴 detector를 실행하지 않는다. face center가 person ROI 위쪽 65%에 있어야 하고 한 ROI에 여러 후보가 있으면 연결을 보류한다. 320×320 SCRFD, 192×192 3D landmark pose 및 112×112 ArcFace를 공유한다.
+순차 GPU scheduler는 사람 탐지/추적 후 기본 0.5초 간격으로 얼굴을 검사한다. 마지막 검사 시각으로 검사 순서를 배분하고 기본 frame당 4 ROI, camera당 100 face track으로 제한한다. 기능 설정에서 검출 FPS·검사 간격·ROI 수를 조정한다. 머리 영역을 320px SCRFD로 먼저 검사하고 필요하면 전체 person ROI, 640px 전체 ROI로 재시도한다. 원래 사람 영역의 위쪽 65% 안에 face center가 있어야 하며 여러 후보는 연결을 보류한다. 검출 패스는 최대 3개이고 192×192 3D pose와 112×112 ArcFace를 공유한다.
 
-원본 크기/선명도/밝기, 탐지 confidence, landmark geometry/정렬 오차, pose와 종합 quality를 검사한다. 현재 품질 설정은 heuristic이며 데이터로 보정된 threshold가 아니다. 작은 얼굴은 pose도 생략하고 제외한다. 통과한 얼굴이 이전 best보다 좋아질 때만 512D embedding/JPEG를 새로 만든다. 이전 best가 있으면 현재 검사에 실패해도 그 세션의 best는 유지하며 두 상태를 별도로 응답한다.
+원본 크기/선명도/밝기, 탐지 confidence, landmark geometry/정렬 오차, pose와 종합 quality를 검사한다. 현재 품질 설정은 heuristic이며 데이터로 보정된 threshold가 아니다. 작은 얼굴은 pose도 생략하고 제외한다. 검사 간격마다 품질을 통과한 얼굴을 embedding/JPEG로 만들고 최근 최대 5장을 유지한다. 사용 시간은 max(기본 3초, 검사 간격×2.5)다. 최근 사진의 최고 품질은 대표 썸네일용 best로 유지한다. 사진별 기존 인물 최대 reference score를 품질에 따라 평균하고 평균이 기준 이상이며 최소 2장이 개별 기준도 충족할 때 후보로 표시한다. 기준 미달과 사진 수집/프레임 간 불일치는 별도 결과다. 특징이 모든 보관 사진과 cosine 0.3 미만이면 사진을 비우며 이 기준 역시 보정 전 설정이다. 이벤트의 사진·시각·품질은 해당 후보를 지지한 사진 중 최고 품질 프레임을 사용한다.
 
-`TrackFaces`는 camera/session마다 메모리 안에만 존재한다. first/last seen 및 best의 frame/capture 시각과 모델 버전을 기록한다. API에는 embedding 없이 quality metadata만 전달한다. 로그인/계정 활성 상태와 camera grant를 검사한 thumbnail API는 session UUID가 일치하고 track이 유효할 때만 JPEG를 제공한다. stop/loop/end/error는 tracker와 face 객체 및 JPEG/result를 버린다. 오래된 session의 track ID로 새 얼굴을 조회할 수 없다. GPU inference 동안 run lock을 장시간 보유하지 않고 publish 직전에 cancel/session을 다시 확인한다. 얼굴 box/landmark overlay는 실제 검사한 frame에만 그린다.
+`TrackFaces`는 camera/session마다 메모리 안에만 존재한다. first/last seen 및 best의 frame/capture 시각과 모델 버전을 기록한다. API에는 embedding 없이 품질·비교 결과만 전달한다. 로그인/계정 활성 상태와 camera grant를 검사한 thumbnail API는 session UUID가 일치하고 track이 유효할 때만 JPEG를 제공한다. stop/loop/end/error는 tracker와 face 객체 및 JPEG/result를 버린다. 오래된 session의 track ID로 새 얼굴을 조회할 수 없다. GPU inference 동안 run lock을 장시간 보유하지 않고 publish 직전에 cancel/session을 다시 확인한다. 얼굴 box/landmark overlay는 실제 검사한 frame에만 그린다.
 
 ONNX Runtime은 CUDA/cuDNN을 preload하고 매 session startup에서 실제 CUDA Conv profile을 검사한다. 요청된 CUDA가 준비되지 않으면 기본값으로 실패하고 CPU 성공으로 보고하지 않는다. session마다 arena limit 1 GiB, unified CUDA stream, cuDNN workspace 제한과 `enable_mem_pattern=False`/`kNextPowerOfTwo`를 사용한다. 검증 중 pinned ORT/model의 반복 추론에서 arena 고갈을 재현하여 이 설정으로 수정했다. limit은 arena에만 적용되므로 총 GPU 메모리는 NVML로 별도 측정한다. [공식 CUDA provider 설정](https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html)을 참고한다.
 
 품질 데이터/정답 예제의 촬영 group 분리 및 독립 평가 자료의 범위는 [calibration-data.md](calibration-data.md)에 정의했다. Phase 4는 해당 모델 버전으로 등록·검색·삭제·보관 정책을 적용한다. Phase 6은 같은 모델을 사용한 MatchEvent 저장 코드를 추가했다.
 
 ## Phase 6 이벤트 저장과 전달
+
+비교점수 기준은 기능 설정의 `face_match_threshold`로 저장하고 worker의 공용 설정에 적용한다. 기존 JSON에 새 항목이 없으면 `.env`의 기준을 병합하며 다른 저장값은 유지한다. 실시간 사진의 비교 cache 키에 기준을 포함하여 사진/특징 재생성 없이 기존 점수를 다시 판정한다. 사진 시험 비교는 같은 worker 기준을 반환하며 이벤트 저장 thread는 transaction 안에서 DB 기준을 다시 읽어 설정 변경 이전에 대기하던 낮은 점수 후보를 제외한다. 기준 변경은 기존 저장 이벤트·세션·추적을 초기화하지 않는다. 상세 검증은 [비교점수 설정 결과](match-threshold-report.md)를 따른다.
 
 ```mermaid
 flowchart LR
@@ -125,17 +130,21 @@ flowchart LR
 
 event_state 잠금 아래 ID를 발급하고 이벤트·변경 journal을 함께 commit해 cursor와 commit 순서를 맞춘다. candidate 사진 개선은 같은 event_id를 갱신하고 change_id를 증가시킨다. 확인/거부 후에는 자동 추론이 사진/상태를 덮어쓰지 않는다. 검토 API는 현재 계정과 카메라 운영·인물 조회 권한 및 CSRF를 검사하고 감사 로그를 같은 transaction에서 저장한다.
 
+개별/선택 목록 삭제도 같은 event_state 잠금 아래 전체 대상의 권한을 검증하고 `status=deleted`, 새 change_id/journal 및 감사 기록을 함께 commit한다. 얼굴·프레임 경로를 비우고 commit 후 파일을 제거한다. 기존 세션·추적·인물 UNIQUE 키는 기록 보관 기간 동안 유지하여 실행 중 분석의 재등록을 막는다. 삭제 행은 일반 목록·상세·사진·검토에서 차단하지만 변경 cursor와 WebSocket은 현재 grant를 다시 검사한 뒤 ID/change_id만 담은 `event_deleted` 알림으로 전달한다. 반복 삭제는 같은 알림을 반환하며 revision/감사 기록을 중복 생성하지 않는다. 기존 status 컬럼을 사용하여 추가 migration 없이 적용한다.
+
 얼굴과 그 관측의 압축 frame을 data/events에 private JPEG로 보관한다. 한 tick의 frame JPEG는 여러 best face가 공유한다. image 7일/event 30일, 저장 한도 500 MB/50,000건, 저장 queue 32건이 기본이다. TTL/deleting/삭제 상태는 조회 즉시 차단하며 30초마다 최대 200건을 정리한다. commit 응답 유실은 파일을 보존하고 1시간 지난 orphan을 SQL 기준으로 정리한다.
 
 WebSocket은 정확한 allowed Origin과 로그인 cookie를 확인하며 전송/2초 heartbeat마다 새 transaction으로 계정/카메라·인물 grant를 검사한다. 연결당 queue 64개/전체 32개/send timeout 5초이며 초과는 1013으로 종료한다. Angular는 event_id별 가장 큰 change_id를 유지하고 HTTP next_cursor로 누락을 복구한다. 재접속·권한 변경·30초 snapshot 조회 및 logout의 늦은 응답을 구분한다. native 적용/측정 한계와 API 규칙은 [Phase 6 결과](phase6-report.md)에 기록했다.
 
 ## Phase 7 Live Search 표시
 
-Angular는 카메라의 현재 `can_view`/`can_operate`와 이벤트의 `can_review`를 사용하여 목록과 조작을 제공한다. 서버는 기존 cookie/CSRF/카메라·인물 grant를 다시 검사한다. 선택 카메라는 hash URL에 저장하고 최신 목록에서 복원한다. 상태 요청은 카메라/페이지 세대를 확인하고 목록 요청은 로그인 세대를 확인하여 늦은 응답을 차단한다. 기본 갱신 간격은 상태 2초, 카메라/등록 얼굴 30초다.
+Angular는 카메라의 현재 `can_view`/`can_operate`와 이벤트의 `can_review`/`can_delete`를 사용하여 목록과 조작을 제공한다. 서버는 기존 cookie/CSRF/카메라·인물 grant를 다시 검사한다. 선택 카메라는 hash URL에 저장하고 최신 목록에서 복원한다. 상태 요청은 카메라/페이지 세대를 확인하고 목록 요청은 로그인 세대를 확인하여 늦은 응답을 차단한다. 기본 갱신 간격은 상태 2초, 카메라/등록 얼굴 30초다.
 
 MJPEG의 bbox/track ID는 같은 분석 JPEG에 포함한다. 인물 grant로 걸러진 후보 이름/수는 중앙 얼굴 카드와 후보 수에 표시하고 MJPEG에 인물 이름을 추가하지 않는다. 오른쪽 현재 등록 얼굴은 ready/이미지 유효 reference 중 품질 우선 대표 사진이며 검출 당시 reference snapshot을 의미하지 않는다. 두 사진 모두 기존 인증 endpoint를 사용하고 실패 시 안내로 전환한다.
 
 카메라/인물 이름/상태 필터는 최대 100개 이벤트의 표시만 바꾼다. EventFeed의 map/buffer 및 HTTP cursor 복구를 필터와 분리하여 숨겨진 이벤트의 변경도 처리한다. 필터 없는 전체 보관 기록 검색과 클립 저장은 이번 UI에 추가하지 않았다.
+
+목록 삭제는 현재 필터에 표시된 삭제 가능 ID만 고정해 전송한다. EventFeed는 삭제 change_id와 snapshot high-water mark로 늦은 증거·HTTP 응답의 재표시를 막으며, 오프라인 삭제는 같은 HTTP 변경 cursor로 복구한다. 30초 snapshot이 포함하는 삭제 표식은 제거해 메모리를 정리한다. 페이지 종료 후 삭제/검토 HTTP 구독도 종료한다. 최신 검증은 [이벤트 삭제 결과](event-deletion-report.md)를 따른다.
 
 ## Phase 4 reference gallery 및 수명
 
@@ -148,3 +157,9 @@ cache key는 `(gallery revision, 아직 유효한 reference ID 목록)`이다. r
 등록은 pending row/file/job commit → Qdrant upsert → ready/revision commit → worker ACK 순서다. 마지막 ACK가 실패하면 pending으로 되돌리고 재시도한다. 삭제는 deleting 상태를 먼저 commit해 API와 검색에서 즉시 제외하고 worker cache ACK/vector delete/file unlink/DB delete를 재시도한다. disable은 SQL eligibility를 즉시 차단하고 Qdrant payload와 cache를 갱신한다. `202` 응답으로 미완료를 표시한다. 인물 상태 변경/업로드/cleanup은 단일 API 프로세스의 공통 RLock으로 직렬화한다. 다중 API 프로세스는 지원하지 않는다.
 
 이미지/특징 retention은 각각 기본 30일이며 새 등록에 적용한다. cleanup은 기본 30초마다 최대 200개의 만료 row를 확인하고 20개 인물 job을 처리한다. 각 job은 해당 인물의 모든 reference를 idempotent하게 reconcile한다. 정리 실패는 제한 backoff로 재시도하고 메타데이터나 private 값은 로그에 기록하지 않는다. 디렉터리 0700/JPEG 0600, 200 MB 저장 한도, 500 MB 최소 여유 공간을 적용한다. 원본·EXIF를 보관하지 않으며 112×112 JPEG만 저장한다. Fernet 암호화 특징의 현재 키는 RTSP 키와 공유한다. 파일 쓰기 후 commit 실패는 즉시 삭제, 프로세스 종료로 생긴 orphan은 1시간 후 정리한다. 완료 job은 7일 후 정리하며 감사 로그는 유지한다.
+
+## 검사 로그와 기능 설정
+
+`recognition_logs`는 영상에서 검사한 얼굴의 단계별 결과와 지표를 보관한다. 별도의 제한 큐/thread가 DB에 저장하며 기본 7일/100,000건을 유지한다. 사진·특징·인물 이름은 기록하지 않는다. 인증된 로그 API는 카메라 grant로 조회·집계·cursor 범위를 제한한다. 품질 제외 프레임에는 과거 보관 사진의 비교 점수를 붙이지 않는다.
+
+`function_settings`는 검출 FPS, 얼굴 검사 간격과 프레임당 ROI 수를 revision과 함께 보관한다. 관리자·CSRF·수정 충돌 검사 후 commit하며 worker가 즉시 ACK하거나 2초 주기의 polling으로 반영한다. scheduler는 프레임 사이에서 변경하고 ByteTrack의 시간 변환도 조정한다. 저장값/적용값은 구분하며 지연은 202로 표시한다. [얼굴 분석 개선 결과](recognition-controls-report.md)를 참고한다.

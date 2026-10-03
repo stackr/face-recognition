@@ -21,9 +21,9 @@
   </main>
 } @else {
   <div class="app-layout">
-    <nav class="sidebar" aria-label="주 메뉴"><div class="nav-caption">WORKSPACE</div><button [class.active]="view() === 'dashboard'" (click)="navigate('dashboard')" [disabled]="busy()">▦ &nbsp; 대시보드</button><button [class.active]="view() === 'cameras'" (click)="navigate('cameras')" [disabled]="busy()">▣ &nbsp; 카메라 관리</button><button [class.active]="view() === 'live'" (click)="navigate('live')" [disabled]="busy()">▷ &nbsp; Live Search</button><button [class.active]="view() === 'persons' || view() === 'person-editor'" (click)="navigate('persons')" [disabled]="busy()">◎ &nbsp; 인물 관리</button><div class="sidebar-note">시험 환경<br><span>사람 탐지 · 카메라별 추적</span></div></nav>
+    <nav class="sidebar" aria-label="주 메뉴"><div class="nav-caption">WORKSPACE</div><button [class.active]="view() === 'dashboard'" (click)="navigate('dashboard')" [disabled]="busy()">▦ &nbsp; 대시보드</button><button [class.active]="view() === 'cameras'" (click)="navigate('cameras')" [disabled]="busy()">▣ &nbsp; 카메라 관리</button><button [class.active]="view() === 'live'" (click)="navigate('live')" [disabled]="busy()">▷ &nbsp; Live Search</button><button [class.active]="view() === 'logs'" (click)="navigate('logs')" [disabled]="busy()">≡ &nbsp; 로그</button><button [class.active]="view() === 'settings'" (click)="navigate('settings')" [disabled]="busy()">⚙ &nbsp; 기능 설정</button><button [class.active]="view() === 'persons' || view() === 'person-editor'" (click)="navigate('persons')" [disabled]="busy()">◎ &nbsp; 인물 관리</button><div class="sidebar-note">시험 환경<br><span>사람 탐지 · 카메라별 추적</span></div></nav>
     <main class="workspace" [class.live-workspace]="view() === 'live'">
-      <div class="page-heading"><div><div class="eyebrow">{{ view() === 'person-editor' ? 'TARGET PERSON' : 'OVERVIEW' }}</div><h1>{{ pageTitle() }}</h1><p>{{ view() === 'dashboard' ? '서비스 연결과 최근 GPU 검증 결과를 확인하세요.' : view() === 'cameras' ? '시험에 사용할 CCTV와 MP4 카메라를 관리하세요.' : (view() === 'persons' || view() === 'person-editor') ? '검색할 인물과 얼굴 사진을 등록하고 시험 비교를 진행하세요.' : '카메라 영상과 실시간 검색 후보를 함께 확인하세요.' }}</p></div><div class="page-heading-actions">@if (view() === 'person-editor') {<button class="btn btn-outline-secondary" (click)="navigate('persons')" [disabled]="busy()">목록으로</button>}<button class="btn btn-outline-secondary" (click)="refreshPage()" [disabled]="busy()">새로고침</button></div></div>
+      <div class="page-heading"><div><div class="eyebrow">{{ view() === 'person-editor' ? 'TARGET PERSON' : 'OVERVIEW' }}</div><h1>{{ pageTitle() }}</h1><p>{{ view() === 'dashboard' ? '서비스 연결과 최근 GPU 검증 결과를 확인하세요.' : view() === 'cameras' ? '시험에 사용할 CCTV와 MP4 카메라를 관리하세요.' : (view() === 'persons' || view() === 'person-editor') ? '검색할 인물과 얼굴 사진을 등록하고 시험 비교를 진행하세요.' : view() === 'logs' ? '얼굴 검출·품질 검사·인물 비교 결과와 제외 사유를 확인하세요.' : view() === 'settings' ? '실행 중인 카메라의 검출 빈도와 얼굴 검사 간격을 조정하세요.' : '카메라 영상과 실시간 검색 후보를 함께 확인하세요.' }}</p></div><div class="page-heading-actions">@if (view() === 'person-editor') {<button class="btn btn-outline-secondary" (click)="navigate('persons')" [disabled]="busy()">목록으로</button>}<button class="btn btn-outline-secondary" (click)="refreshPage()" [disabled]="busy()">새로고침</button></div></div>
       @if (error()) {<div class="alert alert-danger" role="alert">{{ error() }}</div>}
       @if (notice()) {<div class="alert alert-info" role="status">{{ notice() }}</div>}
       @if (view() === 'dashboard') {
@@ -42,6 +42,10 @@
             <div class="table-responsive"><table class="table align-middle"><thead><tr><th>이름</th><th>위치</th><th>연결 주소</th><th>사용</th><th>영상</th>@if (user()?.role === 'admin') {<th>관리</th>}</tr></thead><tbody>@for (camera of cameras(); track camera.camera_id) {<tr><td class="fw-semibold">{{ camera.name }}</td><td>{{ camera.location || '—' }}</td><td class="camera-url">{{ camera.source_type === 'mp4' ? 'MP4 시험 영상' : camera.rtsp_url }}</td><td><span class="badge" [class.text-bg-success]="camera.enabled" [class.text-bg-secondary]="!camera.enabled">{{ camera.enabled ? '사용' : '중지' }}</span></td><td><button class="btn btn-sm btn-primary" (click)="openLive(camera)" [disabled]="busy() || !camera.can_view">영상 분석</button></td>@if (user()?.role === 'admin') {<td class="text-nowrap"><button class="btn btn-sm btn-outline-secondary me-2" (click)="edit(camera)">수정</button><button class="btn btn-sm btn-outline-danger" (click)="deleteCamera(camera)">삭제</button></td>}</tr>}</tbody></table></div>
           }
         </section>
+      } @else if (view() === 'logs') {
+        <app-recognition-logs [cameras]="cameras()" [refreshVersion]="controlsRefresh()" (sessionExpired)="clearSession()" />
+      } @else if (view() === 'settings') {
+        <app-function-settings [requestHeaders]="headers()" [canEdit]="user()?.role === 'admin'" [refreshVersion]="controlsRefresh()" (sessionExpired)="clearSession()" (savingChange)="busy.set($event)" />
       } @else if (view() === 'persons') {
         <section class="card camera-list person-list">
           <div class="person-list-heading">
@@ -103,7 +107,7 @@
                     <p class="text-secondary">시험 임계값 {{ result.threshold | number:'1.2-2' }} · 인물별 등록 얼굴 중 최대 유사도</p>
                     <div class="table-responsive"><table class="table comparison-results"><thead><tr><th>인물</th><th>Cosine 유사도</th><th>판정</th></tr></thead><tbody>@for (match of result.matches; track match.person_id) {<tr><td>{{ match.name }}</td><td>{{ match.similarity | number:'1.4-4' }}</td><td>{{ match.candidate ? '유사도 후보' : '임계값 미달' }}</td></tr>} @empty {<tr><td colspan="3">검색 가능한 등록 얼굴이 없습니다.</td></tr>}</tbody></table></div>
                   }
-                  <small class="face-note">유사도 후보는 인물 확인을 의미하지 않습니다. 임계값 0.75는 정확도 검증 전의 시험 설정입니다.</small>
+                  <small class="face-note">유사도 후보는 인물 확인을 의미하지 않습니다. 비교점수 기준은 기능 설정에서 조정하며 정확도 검증 전의 시험 설정입니다.</small>
                 </section>
               }
           }
@@ -155,12 +159,13 @@
           </div>
           <section class="card faces-panel">
             <h2>추적별 얼굴 분석</h2>
-            <p>크기·선명도·밝기·자세를 검사합니다. 품질을 통과한 가장 좋은 얼굴만 유지합니다.</p>
+            <p>크기·선명도·밝기·자세를 검사합니다. 최근 품질 통과 사진을 함께 비교하고, 2장 이상이 기준을 충족하면 후보로 표시합니다.</p>
             <div class="face-grid">
               @for (track of analysis()?.result?.tracks || []; track track.track_id) {
                 <article class="face-card" [class.face-ready]="track.face?.embedding_ready" [class.candidate-track]="track.face?.matches?.length">
                   @if (track.face?.embedding_ready) {<img [src]="faceUrl(track)" [alt]="'추적 ' + track.track_id + '의 정렬된 최적 얼굴'" width="112" height="112">} @else {<div class="face-empty">#{{ track.track_id }}</div>}
                   <div class="face-details"><strong>추적 #{{ track.track_id }}</strong><div class="face-status">{{ faceLabel(track.face) }}</div><small>현재 품질 {{ track.face?.quality ?? 0 | number:'1.2-2' }} / 1.00</small>
+                    <small>비교 사진 {{ track.face?.sample_count ?? 0 }}장@if (track.face?.comparison?.outcome === 'collecting_samples') { · 추가 사진 검사 대기}</small>
                     @if (track.face?.best; as best) {<small>최적 품질 {{ best.quality | number:'1.2-2' }} · 512차원</small>}
                     @if (track.face?.face_size) {<small>{{ track.face!.face_size!.join(' × ') }} px · 밝기 {{ track.face?.brightness | number:'1.0-0' }}</small>}
                     @if (track.face?.yaw !== null && track.face?.yaw !== undefined) {<small>yaw {{ track.face?.yaw | number:'1.0-0' }}° · pitch {{ track.face?.pitch | number:'1.0-0' }}° · roll {{ track.face?.roll | number:'1.0-0' }}°</small>}

@@ -28,6 +28,7 @@ from app.models import (
     User,
 )
 from app.models.foundation import utc_now
+from app.services.recognition import load_sampling
 
 
 @dataclass(frozen=True)
@@ -45,12 +46,14 @@ class Candidate:
     frame_jpeg: bytes
 
 
-def visible(query, user):
+def visible(query, user, *, include_deleted=False):
     query = (
         query.join(Camera, Camera.id == MatchEvent.camera_id)
         .join(Person, Person.id == MatchEvent.person_id)
         .where(Person.deleting.is_(False), MatchEvent.expires_at > utc_now())
     )
+    if not include_deleted:
+        query = query.where(MatchEvent.status != "deleted")
     if user.role != "admin":
         query = query.where(
             select(CameraPermission.camera_id)
@@ -70,8 +73,13 @@ def visible(query, user):
 
 
 def event_output(db, event, user):
+    if event.status == "deleted":
+        return {"type": "event_deleted", "event_id": event.id, "change_id": event.change_id}
     grant = db.get(CameraPermission, (event.camera_id, user.id))
     images = event.image_expires_at > utc_now()
+    can_manage = user.role == "admin" or (
+        user.role == "operator" and grant is not None and grant.can_operate
+    )
     return {
         "type": "person_match",
         "event_id": event.id,
@@ -92,8 +100,8 @@ def event_output(db, event, user):
         else None,
         "frame_url": f"/api/events/{event.id}/frame" if images and event.frame_image_path else None,
         "video_clip_url": None,
-        "can_review": user.role == "admin"
-        or (user.role == "operator" and grant is not None and grant.can_operate),
+        "can_review": can_manage,
+        "can_delete": can_manage,
     }
 
 
@@ -146,7 +154,7 @@ class EventStore:
         if (
             not re.fullmatch(r"[a-f0-9]{32}", candidate.stream_session_id)
             or candidate.track_id < 1
-            or not self.settings.face_match_threshold <= candidate.similarity <= 1
+            or not -1 <= candidate.similarity <= 1
             or not self.settings.face_quality_threshold <= candidate.quality <= 1
             or not candidate.face_jpeg.startswith(b"\xff\xd8")
             or not candidate.frame_jpeg.startswith(b"\xff\xd8")
@@ -165,6 +173,11 @@ class EventStore:
                 # All writers take this row lock BEFORE allocating IDs. Commit order
                 # matches cursor order, including writes from separate processes.
                 state = self.state(db, lock=True)
+                _, controls = load_sampling(db, self.settings)
+                # A queued candidate may have been produced before a stricter setting
+                # was committed. Reject it quietly using the current saved criterion.
+                if candidate.similarity < controls.face_match_threshold:
+                    return None
                 person, camera = (
                     db.scalar(
                         select(Person).where(Person.id == candidate.person_id).with_for_update()
@@ -312,6 +325,7 @@ class EventStore:
                         MatchEvent, MatchEvent.id == EventChange.event_id
                     ),
                     user,
+                    include_deleted=True,
                 )
                 .where(EventChange.id > after_change_id, EventChange.id <= highwater)
                 .order_by(EventChange.id)
@@ -335,11 +349,55 @@ class EventStore:
             "cursor_kind": "change_id" if after_change_id is not None else "event_id",
         }
 
-    def find(self, db, user, event_id):
-        event = db.scalar(visible(select(MatchEvent), user).where(MatchEvent.id == event_id))
+    def find(self, db, user, event_id, *, include_deleted=False):
+        event = db.scalar(
+            visible(select(MatchEvent), user, include_deleted=include_deleted).where(
+                MatchEvent.id == event_id
+            )
+        )
         if event is None:
             raise HTTPException(404, "Event unavailable")
         return event
+
+    def delete(self, event_ids, user):
+        """Keep a journal tombstone and dedup key; remove private images after commit."""
+        removed = []
+        with self.lock, Session(self.engine) as db:
+            state = self.state(db, lock=True)
+            user = db.get(User, user.id)
+            if user is None or not user.enabled:
+                raise HTTPException(401, "Account unavailable")
+            rows = []
+            # Validate the entire selection before changing anything.
+            for event_id in sorted(set(event_ids)):
+                event = self.find(db, user, event_id, include_deleted=True)
+                grant = db.get(CameraPermission, (event.camera_id, user.id))
+                if user.role != "admin" and (
+                    user.role != "operator" or not grant or not grant.can_operate
+                ):
+                    raise HTTPException(403, "Event deletion permission required")
+                rows.append(event)
+            for event in rows:
+                if event.status == "deleted":
+                    continue
+                removed.extend([event.face_image_path, event.frame_image_path])
+                event.face_image_path = event.frame_image_path = None
+                event.status, event.updated_at = "deleted", utc_now()
+                state.revision += 1
+                event.change_id = state.revision
+                db.add(EventChange(id=state.revision, event_id=event.id))
+                db.add(
+                    AuditLog(
+                        user_id=user.id,
+                        action="event.deleted",
+                        resource_type="event",
+                        resource_id=str(event.id),
+                    )
+                )
+            db.commit()
+            result = [event_output(db, event, user) for event in rows]
+        self.remove_files(removed)
+        return result
 
     def review(self, event_id, user, status):
         with self.lock, Session(self.engine) as db:

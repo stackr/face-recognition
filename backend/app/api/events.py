@@ -1,5 +1,6 @@
 import asyncio
 import hmac
+from typing import Annotated
 
 from fastapi import (
     APIRouter,
@@ -103,6 +104,25 @@ def reject(event_id: int, request: Request, user: User = Depends(operator_user))
     return review(event_id, request, user, "rejected")
 
 
+class DeleteEvents(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    event_ids: list[Annotated[int, Field(strict=True, ge=1)]] = Field(min_length=1, max_length=100)
+
+
+@router.post("/api/events/delete")
+def delete_events(payload: DeleteEvents, request: Request, user: User = Depends(operator_user)):
+    rows = request.app.state.events.delete(payload.event_ids, user)
+    request.app.state.event_broker.notify()
+    return {"items": rows}
+
+
+@router.delete("/api/events/{event_id}")
+def delete_event(event_id: int, request: Request, user: User = Depends(operator_user)):
+    row = request.app.state.events.delete([event_id], user)[0]
+    request.app.state.event_broker.notify()
+    return row
+
+
 class Notification(BaseModel):
     model_config = ConfigDict(extra="forbid")
     event_id: int = Field(ge=1)
@@ -150,7 +170,9 @@ def socket_data(app, token, event_id=None):
         payload = None
         if event_id is not None:
             try:
-                payload = event_output(db, app.state.events.find(db, user, event_id), user)
+                payload = event_output(
+                    db, app.state.events.find(db, user, event_id, include_deleted=True), user
+                )
             except HTTPException as exc:
                 if exc.status_code != 404:
                     raise

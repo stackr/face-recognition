@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 from qdrant_client import QdrantClient
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.api import analysis, auth, cameras, events, persons, system
+from app.api import analysis, auth, cameras, events, persons, recognition, system
 from app.core.config import Settings
 from app.core.logging import configure_logging
 from app.core.security import LoginLimiter
@@ -16,6 +16,7 @@ from app.db.session import make_engine
 from app.services.camera_operations import CameraOperations
 from app.services.event_stream import EventBroker
 from app.services.events import EventStore
+from app.services.recognition import RecognitionStore
 from app.services.references import ReferenceService
 from app.services.worker_client import ViewerLimits, WorkerClient
 
@@ -51,6 +52,7 @@ def create_app(
             while True:
                 try:
                     await asyncio.to_thread(app.state.events.cleanup)
+                    await asyncio.to_thread(app.state.recognition.cleanup)
                 except Exception as exc:
                     logging.getLogger("cctv.events").warning(
                         "Event maintenance failed; type=%s", type(exc).__name__
@@ -80,6 +82,7 @@ def create_app(
     app.state.camera_operations = CameraOperations()
     app.state.references = ReferenceService(settings, engine, vector_client, app.state.worker)
     app.state.events = EventStore(settings, engine)
+    app.state.recognition = RecognitionStore(settings, engine)
     app.state.event_broker = EventBroker(app.state.events)
 
     @app.middleware("http")
@@ -120,6 +123,7 @@ def create_app(
     app.include_router(persons.router)
     app.include_router(system.router)
     app.include_router(events.router)
+    app.include_router(recognition.router)
     return app
 
 
