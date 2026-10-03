@@ -83,13 +83,27 @@ class CalibrationDataset(BaseModel):
                 or entry.end_seconds > source.duration_seconds
             ):
                 raise ValueError("Invalid appearance interval")
+        pairs_seen = set()
         for trial in self.trials:
+            pair = frozenset((trial.first, trial.second))
+            if self.purpose == "threshold_evaluation" and pair in pairs_seen:
+                raise ValueError("Duplicate face pair trial")
+            pairs_seen.add(pair)
             if (
                 trial.first not in references
                 or trial.second not in references
                 or trial.first == trial.second
             ):
                 raise ValueError("Invalid pair references")
+            first_source = sources[references[trial.first].source_id]
+            second_source = sources[references[trial.second].source_id]
+            if (
+                self.purpose == "threshold_evaluation"
+                and first_source.source_group == second_source.source_group
+            ):
+                raise ValueError(
+                    "Enrollment anchor and evaluation probe must use independent captures"
+                )
             if (
                 references[trial.first].subject_id == references[trial.second].subject_id
             ) != trial.same_subject:

@@ -29,3 +29,5 @@ positive pair 1개와 negative pair 1개를 제공하지만 독립 표본이 아
 시험 목적에 맞게 사용할 수 있는 촬영 자료를 서로 다른 세션/카메라/조명/각도로 수집한다. 등록 인물의 복수 reference, 같은 인물의 별도 촬영 probe, 미등록 인물과 threshold 아래 사례를 포함한다. 촬영 group 단위로 calibration/evaluation을 나누고 한 번 고정한 threshold는 독립 evaluation에 그대로 적용한다.
 
 평가 artifact에는 모델 SHA/version, gallery 목록과 person별 점수 집계 규칙, quality 설정, frame sampling, threshold, 판정 단위(얼굴 쌍/track/출현 구간), ground truth 파일 SHA256을 기록한다. detection/quality 단계의 누락과 embedding 비교의 FAR/FRR을 분리한다. 근거가 없는 지표는 `unavailable`로 보고한다. 운영자 confirmed/rejected event를 독립 정답으로 대신 사용하지 않는다.
+
+Phase 10 평가 도구를 구현했다. 데이터 준비·명령·평가 단위·독립 자료 부족과 현재 검증 결과는 [Phase 10 결과](phase10-report.md)를 참고한다. 실제 평가에서는 trial.first를 고정 등록 anchor, trial.second를 probe로 사용하며 second source의 split에 결과를 배정한다. gallery는 --gallery-reference로 명시한다.
