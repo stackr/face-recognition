@@ -4,6 +4,8 @@
 
 로그인/카메라 관리에 더해 MP4 및 기본 RTSP 입력, YOLO11n 사람 탐지, ByteTrack 추적, 인증된 MJPEG 미리보기, 카메라별 영상 접근 권한, 별도 GPU worker와 1채널 benchmark를 사용할 수 있다. SCRFD 얼굴 탐지, 5-point alignment, 품질/자세 평가와 L2 정규화된 512차원 ArcFace 특징을 생성한다. 인물·다중 얼굴 등록, Memory/Qdrant cosine 검색, 인증된 등록 이미지와 인물별 권한, 삭제 재시도 및 이미지·특징별 보관 기간 정리를 제공한다. 전체 요구 사항은 [PLAN.md](PLAN.md), 구현 구성과 후속 설계는 [architecture.md](docs/architecture.md)를 참고한다.
 
+전체 화면은 공통 다크 테마를 사용한다. 로그인, 관리 폼·표, Live Search, 로그, 기능 설정과 얼굴 크롭 화면에 같은 색상 기준을 적용한다.
+
 ## 현재 실행 환경
 
 | 항목 | 검증한 버전 |
