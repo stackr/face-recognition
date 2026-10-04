@@ -54,6 +54,12 @@ def test_settings_auth_validation_conflict_pending_and_ack(app_context, admin_he
         {"detection_confidence": "NaN"},
         {"detection_confidence": "Infinity"},
         {"detection_confidence": None},
+        {"person_detection_enabled": "false"},
+        {"video_face_detection_threshold": 0.09},
+        {"video_face_detection_threshold": 1},
+        {"video_face_min_size": 7},
+        {"video_face_min_size": 513},
+        {"video_face_min_size": 8.5},
         {"extra": 1},
     ):
         assert (
@@ -110,7 +116,7 @@ def test_older_saved_sampling_controls_keep_values_and_use_environment_threshold
         db.commit()
     value = client.get("/api/function-settings").json()
     assert value["revision"] == 9
-    assert value["values"] == legacy | {"face_match_threshold": 0.81, "detection_confidence": 0.25}
+    assert value["values"] == SamplingSettings.defaults(settings).model_dump() | legacy
     with Session(engine) as db:
         assert db.get(FunctionSettings, 1).values == legacy
         row = db.get(FunctionSettings, 1)

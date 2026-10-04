@@ -71,11 +71,14 @@ def update_settings(
     user: User = Depends(admin_user),
     db: Session = Depends(get_db),
 ):
-    values = SamplingSettings.model_validate(payload.model_dump(exclude={"revision"}))
     with settings_lock:
         row = db.scalar(select(FunctionSettings).where(FunctionSettings.id == 1).with_for_update())
         if payload.revision != (row.revision if row else 0):
             raise HTTPException(409, "Settings changed; reload before saving")
+        _, current = load_sampling(db, request.app.state.settings)
+        values = SamplingSettings.model_validate(
+            current.model_dump() | payload.model_dump(exclude={"revision"}, exclude_unset=True)
+        )
         if row is None:
             row = FunctionSettings(id=1, revision=0, values={})
             db.add(row)

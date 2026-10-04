@@ -5,7 +5,7 @@ import {takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {FormsModule, NgForm} from '@angular/forms';
 import {timeout} from 'rxjs';
 
-interface SamplingValues {detection_fps: number; face_analysis_interval: number; face_rois_per_frame: number; face_match_threshold: number; detection_confidence: number;}
+interface SamplingValues {detection_fps: number; face_analysis_interval: number; face_rois_per_frame: number; face_match_threshold: number; detection_confidence: number; person_detection_enabled: boolean; video_face_detection_threshold: number; video_face_min_size: number;}
 interface SettingsResult {
   revision: number; values: SamplingValues; applied: boolean;
   active: {revision: number; values: SamplingValues} | null;
@@ -29,12 +29,13 @@ export class FunctionSettingsComponent implements OnChanges, OnDestroy {
   dirty = false;
   private revision = 0;
   private requestVersion = 0;
-  values: SamplingValues = {detection_fps: 5, face_analysis_interval: 0.5, face_rois_per_frame: 4, face_match_threshold: 0.75, detection_confidence: 0.1};
+  values: SamplingValues = {detection_fps: 5, face_analysis_interval: 0.5, face_rois_per_frame: 4, face_match_threshold: 0.75, detection_confidence: 0.1, person_detection_enabled: true, video_face_detection_threshold: 0.5, video_face_min_size: 8};
   private timer = window.setInterval(() => {if (this.result() && !this.result()!.applied && !this.saving() && !this.loading()) this.load(false);}, 2000);
 
   ngOnChanges(changes: SimpleChanges) {if (changes['refreshVersion'] || changes['canEdit']) this.load(true);}
   ngOnDestroy() {window.clearInterval(this.timer);}
   changed() {this.dirty = true; this.notice.set('');}
+  get videoSizeValid() {return Number.isInteger(this.values.video_face_min_size);}
   load(overwrite = true) {
     if (this.saving()) return;
     const version = ++this.requestVersion;
@@ -48,7 +49,7 @@ export class FunctionSettingsComponent implements OnChanges, OnDestroy {
     });
   }
   save(form: NgForm) {
-    if (!form.valid || !this.result() || !this.canEdit || this.saving() || this.loading()) return;
+    if (!form.valid || !this.videoSizeValid || !this.result() || !this.canEdit || this.saving() || this.loading()) return;
     ++this.requestVersion;
     this.saving.set(true); this.savingChange.emit(true); this.error.set(''); this.notice.set('');
     this.http.put<SettingsResult>('/api/function-settings', {...this.values, revision: this.revision}, {headers: this.requestHeaders})

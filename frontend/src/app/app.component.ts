@@ -34,7 +34,7 @@ interface AnalysisTrack {track_id: number; confidence: number; face?: FaceStatus
 interface AnalysisStatus {
   camera_id: number; state: string; error_code?: string; source_type?: string; stream_session_id?: string;
   detection_fps?: number; capture_fps?: number; processed_frames?: number; dropped_frames?: number;
-  latency_p95_ms?: number; resolution?: number[]; result?: {tracks: AnalysisTrack[]; detection_confidence?: number};
+  latency_p95_ms?: number; resolution?: number[]; result?: {tracks: AnalysisTrack[]; detection_confidence?: number; detection_mode?: string; face_detection_threshold?: number; min_face_size?: number};
   face_analysis_fps?: number; face_roi_fps?: number; face_counts?: {embeddings_created?: number; faces_detected?: number};
   actual_device?: string; reconnect_attempts?: number; reconnects?: number;
   loop?: boolean;

@@ -9,7 +9,7 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
   const prefix = `RECOGNITION-E2E-${Date.now()}`;
   let cameraId: number | undefined;
   let personId: number | undefined;
-  let originalValues: Record<string, number> | undefined;
+  let originalValues: Record<string, number | boolean> | undefined;
   let ownedRevision: number | undefined;
   let headers: Record<string, string> = {};
   const errors: string[] = [];
@@ -63,7 +63,7 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
     await expect(page.locator('app-function-settings').getByRole('status')).toContainText('설정을 저장');
     await expect(page.locator('.settings-state')).toContainText('반영 완료');
     const configured = await (await page.request.get('/api/function-settings')).json();
-    expect(configured.values).toEqual({detection_fps:8, face_analysis_interval:0.2, face_rois_per_frame:6, face_match_threshold:0.7, detection_confidence:0.2});
+    expect(configured.values).toEqual({...originalValues, detection_fps:8, face_analysis_interval:0.2, face_rois_per_frame:6, face_match_threshold:0.7, detection_confidence:0.2});
     expect(configured.applied).toBe(true);
     const after = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
     expect(after.stream_session_id).toBe(before.stream_session_id);

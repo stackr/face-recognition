@@ -91,6 +91,17 @@ class ExtractedFace:
     quality: float
 
 
+def align_detected_face(image, face):
+    """Shared alignment eligibility for uploaded-video extraction and comparison."""
+    if min(np.ceil(face["bbox"][2:]) - np.floor(face["bbox"][:2])) < 16:
+        return None
+    try:
+        aligned, residual = align_face(image, face["landmarks"])
+        return aligned if residual <= 12 else None
+    except (ValueError, np.linalg.LinAlgError):
+        return None
+
+
 def analyze_frame(
     analyzer,
     image,
@@ -120,9 +131,9 @@ def analyze_frame(
         blur = float(cv2.Laplacian(gray, cv2.CV_64F).var())
         embedding = None
         try:
-            aligned, residual = align_face(image, face["landmarks"])
+            aligned = align_detected_face(image, face)
             # Display even quality-rejected faces. Only plausible alignments are compared.
-            if residual <= 12 and min(x2 - x1, y2 - y1) >= 16:
+            if aligned is not None:
                 embedding = normalized_embedding(analyzer.embed(aligned))
         except (ValueError, np.linalg.LinAlgError):
             pass

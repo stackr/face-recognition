@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     recognition_log_queue_size: int = Field(default=256, ge=16, le=1024)
     face_min_size: int = Field(default=80, ge=32, le=512)
     face_detection_threshold: float = Field(default=0.5, ge=0.1, le=0.99)
+    person_detection_enabled: bool = True
+    video_face_detection_threshold: float = Field(default=0.5, ge=0.1, le=0.99)
+    video_face_min_size: int = Field(default=8, ge=8, le=512)
     face_quality_threshold: float = Field(default=0.7, ge=0, le=1)
     face_min_blur: float = Field(default=60, ge=1, le=1000)
     face_max_yaw: float = Field(default=40, ge=5, le=80)

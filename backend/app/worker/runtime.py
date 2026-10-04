@@ -40,6 +40,7 @@ class CameraRun:
         self.cancel = threading.Event()
         self.stream_session_id = uuid.uuid4().hex
         self.tracker = None
+        self.direct_tracker = None
         self.faces = None
         self.reid = None
         self.latest = None
@@ -98,6 +99,7 @@ class CameraRun:
             self.session_captured = self.session_processed = 0
             self.connected_at = None
         self.latest = self.jpeg = self.result = self.tracker = self.faces = self.reid = None
+        self.direct_tracker = None
         self.next_due = 0
 
     def queue_frame(self, image):
@@ -388,12 +390,23 @@ class WorkerRuntime:
                 return
             revision, values = self.pending_sampling
             self.pending_sampling = None
+            mode_changed = values.person_detection_enabled != self.settings.person_detection_enabled
+            criteria_changed = (
+                values.video_face_detection_threshold
+                != self.settings.video_face_detection_threshold
+                or values.video_face_min_size != self.settings.video_face_min_size
+            )
             for name, value in values.model_dump().items():
                 setattr(self.settings, name, value)
             self.configure_detector()
             for run in self.runs.values():
                 with run.lock:
                     run.next_due = 0
+                    if getattr(run, "source_type", None) == "mp4":
+                        if mode_changed:
+                            run.clear_session(rotate=True)
+                        elif criteria_changed and not values.person_detection_enabled:
+                            run.faces = run.result = run.jpeg = None
                     if run.tracker:
                         run.tracker.fps = values.detection_fps
                         run.tracker.tracker.max_frames_lost = max(
@@ -512,6 +525,7 @@ class WorkerRuntime:
                             run.state = "ended"
                             run.ended_mono = time.monotonic()
                             run.jpeg = run.result = run.tracker = run.faces = run.reid = None
+                            run.direct_tracker = None
                             continue
                         if run.latest is None or time.monotonic() < run.next_due:
                             continue
@@ -522,17 +536,29 @@ class WorkerRuntime:
                     continue
                 try:
                     start = time.monotonic()
-                    images = [frame.image for _, frame in batch]
-                    boxes = (
-                        self.detector.detect_batch(images)
-                        if hasattr(self.detector, "detect_batch")
-                        else [self.detector.detect(image) for image in images]
-                    )
+                    person_indices = [
+                        index
+                        for index, (run, _) in enumerate(batch)
+                        if not self.uploaded_face_mode(run)
+                    ]
+                    images = [batch[index][1].image for index in person_indices]
+                    boxes = [None] * len(batch)
+                    if images:
+                        detected = (
+                            self.detector.detect_batch(images)
+                            if hasattr(self.detector, "detect_batch")
+                            else [self.detector.detect(image) for image in images]
+                        )
+                        if len(detected) != len(images):
+                            raise RuntimeError("Detector batch result count mismatch")
+                        for index, detected_boxes in zip(person_indices, detected, strict=True):
+                            boxes[index] = detected_boxes
                     detection_ms = (time.monotonic() - start) * 1000 / len(batch)
                     if len(boxes) != len(batch):
                         raise RuntimeError("Detector batch result count mismatch")
-                    self.batch_counts[len(batch)] += 1
-                    self.batch_ms.append(detection_ms * len(batch))
+                    if images:
+                        self.batch_counts[len(images)] += 1
+                        self.batch_ms.append(detection_ms * len(batch))
                 except Exception:
                     for run, frame in batch:
                         with run.lock:
@@ -558,22 +584,50 @@ class WorkerRuntime:
             "policy": "rotating ready cameras; latest frame only; no batching wait; shrink batches for costly face analysis",
         }
 
+    def uploaded_face_mode(self, run):
+        # This new identity-comparison path is only for user-uploaded recordings.
+        return run.source_type == "mp4" and not self.settings.person_detection_enabled
+
     def process_frame(self, run, frame, boxes, detection_ms):
         try:
+            direct = self.uploaded_face_mode(run)
+            analyzer = self.face_analyzer
+            direct_start = time.monotonic()
+            if direct:
+                from app.worker.uploaded_faces import (
+                    FaceBoxTracker,
+                    UploadedFaceAnalyzer,
+                    detect_uploaded_faces,
+                )
+
+                with run.lock:
+                    if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
+                        return
+                if analyzer is None:
+                    raise RuntimeError("Face detector unavailable")
+                detections = detect_uploaded_faces(analyzer, frame, self.settings, run.cancel)
+                detection_ms = (time.monotonic() - direct_start) * 1000
             with run.lock:
                 if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
                     return
-                if run.tracker is None:
-                    run.tracker = CameraTracker(self.settings)
-                tracks = run.tracker.update(boxes, frame.image, frame.captured_mono)
+                if direct:
+                    if run.direct_tracker is None:
+                        run.direct_tracker = FaceBoxTracker(self.settings)
+                    tracks, candidates = run.direct_tracker.update(detections, frame.captured_mono)
+                    analyzer = UploadedFaceAnalyzer(analyzer, candidates)
+                    live_ids = run.direct_tracker.live_ids()
+                else:
+                    if run.tracker is None:
+                        run.tracker = CameraTracker(self.settings)
+                    tracks = run.tracker.update(boxes, frame.image, frame.captured_mono)
+                    live_ids = run.tracker.live_ids()
                 if run.faces is None:
                     run.faces = TrackFaces(self.settings)
                 faces = run.faces
-                live_ids = run.tracker.live_ids()
-            face_start = time.monotonic()
+            face_start = direct_start if direct else time.monotonic()
             face_counts = Counter()
             if self.face_analyzer is not None:
-                face_counts = faces.process(self.face_analyzer, frame, tracks, live_ids)
+                face_counts = faces.process(analyzer, frame, tracks, live_ids)
             face_process_ms = (time.monotonic() - face_start) * 1000
             search_start = time.monotonic()
             gallery_revision = None
@@ -592,7 +646,7 @@ class WorkerRuntime:
             face_ms = (time.monotonic() - face_start) * 1000
             reid_counts = Counter()
             reid_start = time.monotonic()
-            if self.reidentifier is not None:
+            if self.reidentifier is not None and not direct:
                 from app.worker.reid import BodyTrackCache
 
                 with run.lock:
@@ -614,7 +668,7 @@ class WorkerRuntime:
                 cv2.rectangle(annotated, (x1, y1), (x2, y2), (80, 230, 120), 2)
                 cv2.putText(
                     annotated,
-                    f"person #{track['track_id']} {track['confidence']:.2f}",
+                    f"{'face' if direct else 'person'} #{track['track_id']} {track['confidence']:.2f}",
                     (max(0, x1), max(20, y1 - 8)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
@@ -676,6 +730,11 @@ class WorkerRuntime:
                     "gallery_revision": gallery_revision,
                     "search_status": search_status,
                     "detection_confidence": self.settings.detection_confidence,
+                    "detection_mode": "face" if direct else "person",
+                    "face_detection_threshold": self.settings.video_face_detection_threshold
+                    if direct
+                    else None,
+                    "min_face_size": self.settings.video_face_min_size if direct else None,
                 }
                 run.processed += 1
                 run.session_processed += 1
