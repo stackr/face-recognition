@@ -62,13 +62,7 @@ export class AppComponent implements OnDestroy {
   controlsRefresh = signal(0);
   status = signal<SystemStatus | null>(null);
   cameras = signal<Camera[]>([]);
-  cameraSearch = signal('');
   viewableCameras = computed(() => this.cameras().filter(camera => camera.can_view));
-  liveCameras = computed(() => {
-    const query = this.cameraSearch().trim().toLocaleLowerCase();
-    return this.viewableCameras().filter(camera => !query
-      || `${camera.name} ${camera.location}`.toLocaleLowerCase().includes(query));
-  });
   private camerasLoaded = false;
   private liveRouteId: number | null = null;
   private liveVersion = 0;
@@ -104,8 +98,6 @@ export class AppComponent implements OnDestroy {
   previewVersion = signal(0);
   analysisSource: 'rtsp' | 'mp4' = 'rtsp';
   loopVideo = true;
-  permissionUsername = '';
-  permissionOperate = false;
   private statusPending = false;
   private pollTimer = window.setInterval(() => {
     if (this.user() && this.selectedCamera() && this.view() === 'live') this.refreshAnalysis();
@@ -210,7 +202,7 @@ export class AppComponent implements OnDestroy {
     });
   }
 
-  clearSession() { this.sessionVersion++; this.liveVersion++; this.statusPending = false; this.camerasLoaded = false; this.resetPersonEditor(); this.user.set(null); this.csrf = ''; this.cameras.set([]); this.persons.set([]); this.status.set(null); this.selectedCamera.set(null); this.analysis.set(null); this.cameraSearch.set(''); this.error.set(''); this.notice.set(''); }
+  clearSession() { this.sessionVersion++; this.liveVersion++; this.statusPending = false; this.camerasLoaded = false; this.resetPersonEditor(); this.user.set(null); this.csrf = ''; this.cameras.set([]); this.persons.set([]); this.status.set(null); this.selectedCamera.set(null); this.analysis.set(null); this.error.set(''); this.notice.set(''); }
 
   handleError(err: HttpErrorResponse) {
     if (err.status === 401) { this.clearSession(); this.error.set('세션이 만료되었습니다. 다시 로그인해 주세요.'); }
@@ -512,14 +504,6 @@ export class AppComponent implements OnDestroy {
       ? '카메라 연결을 다시 시도하고 있습니다.'
       : `약 ${Math.ceil(seconds)}초 후 다시 연결합니다.`;
   }
-  setCameraAccess(canView: boolean) {
-    const camera = this.selectedCamera(); if (!camera || !this.permissionUsername.trim()) return;
-    this.http.put(`/api/cameras/${camera.camera_id}/access`, {username:this.permissionUsername.trim(), can_view:canView, can_operate:canView && this.permissionOperate}, {headers:this.headers()}).subscribe({
-      next: () => { this.notice.set(canView ? '카메라 영상 접근 권한을 저장했습니다.' : '카메라 영상 접근 권한을 해제했습니다.'); this.permissionUsername = ''; },
-      error: err => this.handleError(err)
-    });
-  }
-
   serviceLabel(value: string | undefined) { return value === 'ok' ? '정상' : value === 'unavailable' ? '연결 실패' : '확인 중'; }
   gpuLabel() {
     const gpu = this.status()?.gpu;
