@@ -12,7 +12,7 @@ from app.schemas.recognition import SamplingSettings
 
 def load_sampling(db, settings):
     row = db.get(FunctionSettings, 1)
-    # Older saved JSON has only the three sampling controls. Keep those values
+    # Older saved JSON lacks some controls. Keep those values
     # and supply newly introduced controls from the environment defaults.
     values = SamplingSettings.defaults(settings).model_dump() | (row.values if row else {})
     return row.revision if row else 0, SamplingSettings.model_validate(values)

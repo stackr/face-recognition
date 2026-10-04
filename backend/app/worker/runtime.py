@@ -350,6 +350,7 @@ class WorkerRuntime:
         self.face_tests = None
         self.sampling_revision = sampling_revision
         self.pending_sampling = None
+        self.configure_detector()
         self.batch_counts = Counter()
         self.batch_ms = deque(maxlen=600)
         self.rotation = 0
@@ -359,6 +360,11 @@ class WorkerRuntime:
         self.cancel = threading.Event()
         self.scheduler = threading.Thread(target=self.schedule, daemon=True, name="shared-gpu")
         self.scheduler.start()
+
+    def configure_detector(self):
+        configure = getattr(self.detector, "configure_confidence", None)
+        if configure is not None:
+            configure(self.settings.detection_confidence)
 
     def sampling_status(self):
         from app.schemas.recognition import SamplingSettings
@@ -384,6 +390,7 @@ class WorkerRuntime:
             self.pending_sampling = None
             for name, value in values.model_dump().items():
                 setattr(self.settings, name, value)
+            self.configure_detector()
             for run in self.runs.values():
                 with run.lock:
                     run.next_due = 0
@@ -668,6 +675,7 @@ class WorkerRuntime:
                     "tracks": tracks,
                     "gallery_revision": gallery_revision,
                     "search_status": search_status,
+                    "detection_confidence": self.settings.detection_confidence,
                 }
                 run.processed += 1
                 run.session_processed += 1

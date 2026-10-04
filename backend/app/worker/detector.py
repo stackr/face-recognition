@@ -53,8 +53,13 @@ class YoloPersonDetector:
             "parameter_dtype": str(next(self.model.predictor.model.model.parameters()).dtype),
             "resize": "long edge 640; stride-aligned rectangular padding; mixed shapes square 640",
             "max_batch_size": settings.detector_batch_size,
+            "confidence_threshold": self.confidence,
             "status": "passed" if actual.startswith("cuda") else "cpu",
         }
+
+    def configure_confidence(self, value):
+        self.confidence = value
+        self.info["confidence_threshold"] = value
 
     def detect(self, frame):
         return self.detect_batch([frame])[0]

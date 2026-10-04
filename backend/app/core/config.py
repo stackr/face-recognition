@@ -128,13 +128,10 @@ class Settings(BaseSettings):
     def tracker_thresholds(self):
         if self.rtsp_reconnect_initial_seconds > self.rtsp_reconnect_max_seconds:
             raise ValueError("RTSP retry maximum must be at least the initial delay")
-        if (
-            not self.detection_confidence
-            <= self.track_low_threshold
-            < self.track_high_threshold
-            <= self.new_track_threshold
-        ):
-            raise ValueError("Detector threshold must preserve low-score tracking detections")
+        # Raising the detector cutoff intentionally filters low-score associations.
+        # Keep the tracker's own thresholds ordered independently of that cutoff.
+        if not self.track_low_threshold < self.track_high_threshold <= self.new_track_threshold:
+            raise ValueError("Tracker thresholds must be ordered")
         return self
 
     @field_validator("worker_url", "api_url")

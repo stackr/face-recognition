@@ -4,13 +4,14 @@
   <section class="card settings-state">
     <div><h2>분석 설정 반영 상태</h2><span class="badge" [class.text-bg-success]="settings.applied && !saving()" [class.text-bg-warning]="!settings.applied || saving()">{{ saving() ? '저장 및 반영 중' : settings.applied ? '반영 완료' : settings.active ? '반영 대기' : '분석 서비스 연결 대기' }}</span></div>
     <p>모든 카메라에 적용됩니다. 저장한 값은 서비스 재시작 후에도 유지됩니다.</p>
-    @if (settings.active; as active) {<small>현재 적용: 사람 검출 {{ active.values.detection_fps }} FPS · 얼굴 검사 간격 {{ active.values.face_analysis_interval }}초 · 프레임당 최대 {{ active.values.face_rois_per_frame }}명 · 비교점수 기준 {{ active.values.face_match_threshold | number:'1.2-4' }}</small>}
+    @if (settings.active; as active) {<small>현재 적용: 사람 검출 기준 {{ active.values.detection_confidence | number:'1.2-4' }} · 사람 검출 {{ active.values.detection_fps }} FPS · 얼굴 검사 간격 {{ active.values.face_analysis_interval }}초 · 프레임당 최대 {{ active.values.face_rois_per_frame }}명 · 비교점수 기준 {{ active.values.face_match_threshold | number:'1.2-4' }}</small>}
   </section>
   <form class="card function-settings-form" #form="ngForm" (ngSubmit)="save(form)">
-    <h2>검사 빈도와 비교 기준</h2>
+    <h2>검출 기준·검사 빈도와 비교 기준</h2>
     @if (!canEdit) {<p class="text-secondary">설정 변경은 관리자 계정에서 가능합니다.</p>}
     <fieldset [disabled]="!canEdit || saving() || loading()">
       <div class="settings-fields">
+        <div><label class="form-label" for="person-detection-confidence">사람 검출 기준 점수</label><input id="person-detection-confidence" name="person-detection-confidence" type="number" class="form-control" [(ngModel)]="values.detection_confidence" (ngModelChange)="changed()" min="0" max="1" step="0.01" required><small>0~1. 높이면 신뢰도가 높은 사람만 검출합니다. 저장하면 실행 중인 Live Search의 다음 검출부터 적용됩니다. 새 추적 시작 기준 {{ settings.features.person_track_start_threshold | number:'1.2-2' }}는 별도 기준입니다.</small></div>
         <div><label class="form-label" for="detection-fps">사람 검출 빈도 (FPS)</label><input id="detection-fps" name="detection-fps" type="number" class="form-control" [(ngModel)]="values.detection_fps" (ngModelChange)="changed()" min="1" max="15" step="0.5" required><small>1~15 FPS. 높이면 움직임을 더 자주 확인합니다.</small></div>
         <div><label class="form-label" for="face-interval">얼굴 검사 간격 (초)</label><input id="face-interval" name="face-interval" type="number" class="form-control" [(ngModel)]="values.face_analysis_interval" (ngModelChange)="changed()" min="0.2" max="10" step="0.05" required><small>0.2~10초. 작을수록 인물별 얼굴 검사 기회가 늘어납니다.</small></div>
         <div><label class="form-label" for="face-budget">프레임당 최대 얼굴 검사 인원</label><input id="face-budget" name="face-budget" type="number" class="form-control" [(ngModel)]="values.face_rois_per_frame" (ngModelChange)="changed()" min="1" max="16" step="1" required><small>1~16명. 여러 사람이 있을 때 대기 순서에 따라 검사합니다.</small></div>

@@ -14,15 +14,18 @@ from alembic.operations import Operations
 from app.models import Base, Camera, CameraPermission, FunctionSettings, RecognitionLog, User
 from app.schemas.recognition import SamplingSettings
 from app.services.recognition import RecognitionStore, load_sampling, observation
+from app.worker.api import create_worker
+from app.worker.detector import YoloPersonDetector
 from app.worker.face_onnx import TEMPLATE, FaceModels
 from app.worker.faces import FaceAnalyzer, TrackFaces
 from app.worker.runtime import WorkerRuntime
 from conftest import TEST_PASSWORD
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 from test_analysis import replace_worker
 from test_faces import StubFaces, people, sample_frame
-from test_worker import TestDetector
+from test_worker import TestDetector, boxes, write_video
 
 
 def test_settings_auth_validation_conflict_pending_and_ack(app_context, admin_headers):
@@ -30,10 +33,12 @@ def test_settings_auth_validation_conflict_pending_and_ack(app_context, admin_he
     original = client.get("/api/function-settings").json()
     assert original["values"]["face_analysis_interval"] == 0.5
     assert original["values"]["face_match_threshold"] == 0.75
+    assert original["values"]["detection_confidence"] == 0.1
     values = original["values"] | {
         "face_analysis_interval": 0.2,
         "detection_fps": 10,
         "face_match_threshold": 0.65,
+        "detection_confidence": 0.4,
     }
     assert client.put("/api/function-settings", json=values | {"revision": 0}).status_code == 403
     for bad in (
@@ -44,6 +49,11 @@ def test_settings_auth_validation_conflict_pending_and_ack(app_context, admin_he
         {"face_match_threshold": 1.01},
         {"face_match_threshold": "NaN"},
         {"face_match_threshold": None},
+        {"detection_confidence": -0.01},
+        {"detection_confidence": 1.01},
+        {"detection_confidence": "NaN"},
+        {"detection_confidence": "Infinity"},
+        {"detection_confidence": None},
         {"extra": 1},
     ):
         assert (
@@ -93,19 +103,24 @@ def test_older_saved_sampling_controls_keep_values_and_use_environment_threshold
 ):
     client, engine, settings = app_context
     settings.face_match_threshold = 0.81
+    settings.detection_confidence = 0.25
     legacy = {"detection_fps": 12, "face_analysis_interval": 0.3, "face_rois_per_frame": 7}
     with Session(engine) as db:
         db.add(FunctionSettings(id=1, revision=9, values=legacy))
         db.commit()
     value = client.get("/api/function-settings").json()
     assert value["revision"] == 9
-    assert value["values"] == legacy | {"face_match_threshold": 0.81}
+    assert value["values"] == legacy | {"face_match_threshold": 0.81, "detection_confidence": 0.25}
     with Session(engine) as db:
         assert db.get(FunctionSettings, 1).values == legacy
         row = db.get(FunctionSettings, 1)
         row.values = legacy | {"face_match_threshold": 0.62}
         db.commit()
         assert load_sampling(db, settings)[1].face_match_threshold == 0.62
+        assert load_sampling(db, settings)[1].detection_confidence == 0.25
+        row.values = row.values | {"detection_confidence": 0.8}
+        db.commit()
+        assert load_sampling(db, settings)[1].detection_confidence == 0.8
 
 
 def record(camera_id, frame_id, *, outcome="quality_rejected", reasons=None, when=None):
@@ -246,7 +261,14 @@ def test_observation_excludes_private_content_and_unsampled_frames():
 
 def test_live_sampling_update_keeps_track_and_updates_tracker_clock(app_context):
     settings = app_context[2]
-    runtime = WorkerRuntime(settings, TestDetector(), StubFaces())
+
+    class ConfigurableDetector(TestDetector):
+        def configure_confidence(self, value):
+            self.confidence = value
+
+    detector = ConfigurableDetector()
+    runtime = WorkerRuntime(settings, detector, StubFaces())
+    assert detector.confidence == settings.detection_confidence
     tracker = SimpleNamespace(fps=5, tracker=SimpleNamespace(max_frames_lost=15))
     faces = object()
     run = SimpleNamespace(
@@ -266,6 +288,7 @@ def test_live_sampling_update_keeps_track_and_updates_tracker_clock(app_context)
             face_analysis_interval=0.2,
             face_rois_per_frame=8,
             face_match_threshold=0.68,
+            detection_confidence=0.4,
         )
         runtime.queue_sampling(2, values)
         runtime.queue_sampling(1, SamplingSettings.defaults(settings))
@@ -276,10 +299,97 @@ def test_live_sampling_update_keeps_track_and_updates_tracker_clock(app_context)
         assert run.faces is faces and run.tracker is tracker and tracker.fps == 10
         assert tracker.tracker.max_frames_lost == 30
         assert settings.face_match_threshold == 0.68
+        assert settings.detection_confidence == detector.confidence == 0.4
     finally:
         with runtime.lock:
             runtime.runs.clear()
         runtime.close()
+
+
+def test_detector_receives_persisted_cutoff_before_first_and_later_inference(app_context):
+    settings = app_context[2]
+    settings.detection_confidence = 0.35
+    calls = []
+
+    def predict(frames, **kwargs):
+        calls.append(kwargs["conf"])
+        return [SimpleNamespace(boxes=boxes(empty=kwargs["conf"] > 0.9)) for _ in frames]
+
+    detector = YoloPersonDetector.__new__(YoloPersonDetector)
+    detector.model = SimpleNamespace(predict=predict)
+    detector.info = {"model": "unit-test", "actual_device": "cpu"}
+    detector.confidence, detector.device, detector.fp16 = 0.1, "cpu", False
+    runtime = WorkerRuntime(settings, detector)
+    try:
+        image = np.zeros((120, 160, 3), np.uint8)
+        assert len(detector.detect(image)) == 1
+        runtime.queue_sampling(
+            1, SamplingSettings.defaults(settings).model_copy(update={"detection_confidence": 0.95})
+        )
+        deadline = time.monotonic() + 2
+        while runtime.sampling_status()["revision"] != 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert len(detector.detect_batch([image, image])[0]) == 0
+        assert calls == [0.35, 0.95]
+        assert detector.info["confidence_threshold"] == 0.95
+        assert settings.track_low_threshold == 0.1 and settings.new_track_threshold == 0.6
+        assert settings.model_copy(update={"detection_confidence": 0.95}).tracker_thresholds()
+        with pytest.raises(ValueError):
+            settings.model_copy(update={"track_low_threshold": 0.7}).tracker_thresholds()
+    finally:
+        runtime.close()
+
+
+def test_running_camera_cutoff_changes_tracks_without_restarting_or_losing_tracker(app_context):
+    settings = app_context[2]
+    video = settings.video_dir / "confidence.mp4"
+    write_video(video, seconds=5)
+
+    class ConfigurableDetector(TestDetector):
+        def configure_confidence(self, value):
+            self.confidence = value
+
+        def detect(self, image):
+            return boxes(empty=self.confidence > 0.9)
+
+    detector = ConfigurableDetector()
+    with TestClient(
+        create_worker(settings, detector, enable_faces=False, enable_gallery=False)
+    ) as client:
+        client.headers["X-Service-Token"] = settings.service_token.get_secret_value()
+        assert (
+            client.post(
+                "/internal/cameras/1/start",
+                json={"source": str(video), "source_type": "mp4", "loop": True},
+            ).status_code
+            == 200
+        )
+        from test_worker import wait_for
+
+        before = wait_for(
+            client, "/internal/cameras/1", lambda row: bool((row.get("result") or {}).get("tracks"))
+        )
+        runtime = client.app.state.runtime
+        tracker = runtime.get(1).tracker
+        values = SamplingSettings.defaults(settings).model_copy(
+            update={"detection_confidence": 0.95}
+        )
+        runtime.queue_sampling(1, values)
+        after = wait_for(
+            client,
+            "/internal/cameras/1",
+            lambda row: (row.get("result") or {}).get("detection_confidence") == 0.95,
+        )
+        assert after["state"] == "running" and after["result"]["tracks"] == []
+        assert after["stream_session_id"] == before["stream_session_id"]
+        assert runtime.get(1).tracker is tracker
+        runtime.queue_sampling(2, values.model_copy(update={"detection_confidence": 0.1}))
+        restored = wait_for(
+            client, "/internal/cameras/1", lambda row: bool((row.get("result") or {}).get("tracks"))
+        )
+        assert restored["result"]["detection_confidence"] == 0.1
+        assert restored["stream_session_id"] == before["stream_session_id"]
+        assert runtime.get(1).tracker is tracker
 
 
 @pytest.mark.parametrize(

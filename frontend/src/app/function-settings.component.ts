@@ -5,11 +5,11 @@ import {takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {FormsModule, NgForm} from '@angular/forms';
 import {timeout} from 'rxjs';
 
-interface SamplingValues {detection_fps: number; face_analysis_interval: number; face_rois_per_frame: number; face_match_threshold: number;}
+interface SamplingValues {detection_fps: number; face_analysis_interval: number; face_rois_per_frame: number; face_match_threshold: number; detection_confidence: number;}
 interface SettingsResult {
   revision: number; values: SamplingValues; applied: boolean;
   active: {revision: number; values: SamplingValues} | null;
-  features: {sample_count: number; sample_window_seconds: number; minimum_samples: number; retry_detector_size: number};
+  features: {sample_count: number; sample_window_seconds: number; minimum_samples: number; retry_detector_size: number; person_track_start_threshold: number};
 }
 
 @Component({selector: 'app-function-settings', standalone: true, imports: [CommonModule, FormsModule], templateUrl: './function-settings.component.html'})
@@ -29,7 +29,7 @@ export class FunctionSettingsComponent implements OnChanges, OnDestroy {
   dirty = false;
   private revision = 0;
   private requestVersion = 0;
-  values: SamplingValues = {detection_fps: 5, face_analysis_interval: 0.5, face_rois_per_frame: 4, face_match_threshold: 0.75};
+  values: SamplingValues = {detection_fps: 5, face_analysis_interval: 0.5, face_rois_per_frame: 4, face_match_threshold: 0.75, detection_confidence: 0.1};
   private timer = window.setInterval(() => {if (this.result() && !this.result()!.applied && !this.saving() && !this.loading()) this.load(false);}, 2000);
 
   ngOnChanges(changes: SimpleChanges) {if (changes['refreshVersion'] || changes['canEdit']) this.load(true);}

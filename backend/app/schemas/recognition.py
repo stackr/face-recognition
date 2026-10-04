@@ -15,6 +15,7 @@ class SamplingSettings(BaseModel):
     face_analysis_interval: float = Field(ge=0.2, le=10)
     face_rois_per_frame: int = Field(ge=1, le=16)
     face_match_threshold: float = Field(default=0.75, ge=-1, le=1)
+    detection_confidence: float = Field(default=0.1, ge=0, le=1)
 
     @classmethod
     def defaults(cls, settings):
@@ -23,4 +24,5 @@ class SamplingSettings(BaseModel):
 
 class SamplingUpdate(SamplingSettings):
     face_match_threshold: float = Field(ge=-1, le=1)
+    detection_confidence: float = Field(ge=0, le=1)
     revision: int = Field(ge=0)

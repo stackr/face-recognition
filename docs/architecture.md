@@ -48,7 +48,7 @@ Phase 6은 worker의 별도 EventWriter thread가 bounded snapshot queue에서 M
 
 ## frame, tracking 및 미리보기
 
-현재 camera별 최신 inference 대기 frame은 1개로 제한한다. scheduler는 camera별 처리 기회를 보장하고 queue가 밀리면 오래된 frame을 교체한다. detector confidence의 낮은 cutoff와 tracker의 high/new-track threshold를 구분하여 ByteTrack의 low-score association을 보존한다.
+현재 camera별 최신 inference 대기 frame은 1개로 제한한다. scheduler는 camera별 처리 기회를 보장하고 queue가 밀리면 오래된 frame을 교체한다. detector confidence와 tracker의 low/high/new-track threshold를 구분한다. 기본 검출 기준 0.10은 ByteTrack의 low-score association을 보존한다. 기능 설정에서 0~1의 검출 기준을 저장하면 scheduler가 프레임 사이에 실제 YOLO cutoff를 변경하며 추적기의 별도 기준과 기존 추적 객체는 유지한다. 높은 검출 기준은 그보다 낮은 후보를 추적기 입력에서 제외한다.
 
 frame 및 분석 결과에는 `camera_id`, `stream_session_id`, `frame_id`, capture timestamp가 있다. UTC는 저장 및 화면 시각, monotonic clock은 latency/timeout 측정에 사용한다. tracker update의 실제 간격과 lost-track 유지 시간을 반영한다.
 

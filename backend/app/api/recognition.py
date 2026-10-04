@@ -50,6 +50,7 @@ def settings_output(request, revision, values):
                 request.app.state.settings, values.face_analysis_interval
             ),
             "minimum_samples": 2,
+            "person_track_start_threshold": request.app.state.settings.new_track_threshold,
         },
     }
 
