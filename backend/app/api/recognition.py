@@ -2,7 +2,7 @@ import threading
 from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app.api.analysis import camera_access
@@ -106,6 +106,21 @@ def update_settings(
 
 def as_utc(value):
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+@router.delete("/api/recognition-logs")
+def delete_logs(user: User = Depends(admin_user), db: Session = Depends(get_db)):
+    result = db.execute(delete(RecognitionLog))
+    db.add(
+        AuditLog(
+            user_id=user.id,
+            action="recognition_logs.delete_all",
+            resource_type="recognition_log",
+            resource_id="all",
+        )
+    )
+    db.commit()
+    return {"deleted_count": result.rowcount}
 
 
 @router.get("/api/recognition-logs")

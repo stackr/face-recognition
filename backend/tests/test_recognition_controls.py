@@ -11,7 +11,15 @@ import pytest
 from alembic.autogenerate import compare_metadata
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from app.models import Base, Camera, CameraPermission, FunctionSettings, RecognitionLog, User
+from app.models import (
+    AuditLog,
+    Base,
+    Camera,
+    CameraPermission,
+    FunctionSettings,
+    RecognitionLog,
+    User,
+)
 from app.schemas.recognition import SamplingSettings
 from app.services.recognition import RecognitionStore, load_sampling, observation
 from app.worker.api import create_worker
@@ -145,6 +153,54 @@ def record(camera_id, frame_id, *, outcome="quality_rejected", reasons=None, whe
         "sample_count": 0,
         "settings_revision": 0,
     }
+
+
+def test_delete_all_logs_requires_admin_csrf_and_keeps_other_data(app_context, admin_headers):
+    client, engine, settings = app_context
+    ids = [
+        client.post(
+            "/api/cameras", json={"name": name, "source_type": "mp4"}, headers=admin_headers
+        ).json()["camera_id"]
+        for name in ("A", "B")
+    ]
+    with Session(engine) as db:
+        db.add_all(
+            [
+                RecognitionLog(**record(ids[0], 1)),
+                RecognitionLog(**record(ids[1], 1, when=datetime(2000, 1, 1))),
+                FunctionSettings(id=1, revision=3, values={"detection_fps": 7}),
+            ]
+        )
+        db.commit()
+    assert client.delete("/api/recognition-logs").status_code == 403
+    viewer = client.post(
+        "/api/auth/login", json={"username": "viewer", "password": TEST_PASSWORD}
+    ).json()
+    assert (
+        client.delete(
+            "/api/recognition-logs", headers={"X-CSRF-Token": viewer["csrf_token"]}
+        ).status_code
+        == 403
+    )
+    with Session(engine) as db:
+        assert db.scalar(select(func.count()).select_from(RecognitionLog)) == 2
+    client.post("/api/auth/logout", headers={"X-CSRF-Token": viewer["csrf_token"]})
+    assert client.delete("/api/recognition-logs").status_code == 401
+    admin = client.post(
+        "/api/auth/login", json={"username": "admin", "password": TEST_PASSWORD}
+    ).json()
+    headers = {"X-CSRF-Token": admin["csrf_token"]}
+    deleted = client.delete("/api/recognition-logs", headers=headers)
+    assert deleted.status_code == 200 and deleted.json() == {"deleted_count": 2}
+    assert client.get("/api/recognition-logs").json()["summary"]["total"] == 0
+    with Session(engine) as db:
+        assert db.scalar(select(func.count()).select_from(RecognitionLog)) == 0
+        assert db.scalar(select(func.count()).select_from(Camera)) == 2
+        assert db.get(FunctionSettings, 1).revision == 3
+        assert db.scalar(select(AuditLog).where(AuditLog.action == "recognition_logs.delete_all"))
+    assert client.delete("/api/recognition-logs", headers=headers).json() == {"deleted_count": 0}
+    RecognitionStore(settings, engine).save([record(ids[0], 2)])
+    assert client.get("/api/recognition-logs").json()["summary"]["total"] == 1
 
 
 def test_logs_filter_summary_pagination_and_camera_grants(app_context, admin_headers):

@@ -1,3 +1,4 @@
+@if (notice()) {<div class="alert alert-success" role="status">{{ notice() }}</div>}
 @if (error()) {<div class="alert alert-danger" role="alert">{{ error() }}</div>}
 <form class="card log-filters" (ngSubmit)="applyFilters()">
   <div class="log-filter-fields">
@@ -7,13 +8,13 @@
     <div><label for="log-start" class="form-label">시작 시각</label><input id="log-start" name="log-start" type="datetime-local" class="form-control" [(ngModel)]="filters.start"></div>
     <div><label for="log-end" class="form-label">종료 시각</label><input id="log-end" name="log-end" type="datetime-local" class="form-control" [(ngModel)]="filters.end"></div>
   </div>
-  <div class="log-actions"><button class="btn btn-primary" type="submit" [disabled]="loading()">조회</button><button class="btn btn-outline-secondary" type="button" (click)="reset()" [disabled]="loading()">필터 초기화</button><label class="form-check ms-auto"><input type="checkbox" name="log-auto" class="form-check-input" [(ngModel)]="autoRefresh"><span class="form-check-label">최신 페이지 자동 갱신 (5초)</span></label></div>
+  <div class="log-actions"><button class="btn btn-primary" type="submit" [disabled]="loading() || deleting()">조회</button><button class="btn btn-outline-secondary" type="button" (click)="reset()" [disabled]="loading() || deleting()">필터 초기화</button><label class="form-check ms-auto"><input type="checkbox" name="log-auto" class="form-check-input" [(ngModel)]="autoRefresh"><span class="form-check-label">최신 페이지 자동 갱신 (5초)</span></label></div>
 </form>
 @if (page(); as logs) {
   <section class="card log-summary"><h2>검색 조건의 검사 결과</h2><div class="log-counts"><strong>전체 {{ logs.summary.total | number }}건</strong>@for (item of outcomes; track item[0]) {<span>{{ item[1] }} <b>{{ logs.summary.outcomes[item[0]] || 0 | number }}</b></span>}</div>
     <details class="mt-3"><summary>주요 제외 사유별 집계</summary><div class="log-counts mt-2">@for (item of reasonSummary(); track item[0]) {<span>{{ reasonLabel(item[0]) }} <b>{{ item[1] | number }}</b></span>} @empty {<span>제외 기록이 없습니다.</span>}</div><small>여러 사유가 있으면 첫 번째 사유로 집계합니다. 개별 기록에는 모든 사유를 표시합니다.</small></details>
   </section>
-  <section class="card recognition-log-list"><div class="log-list-heading"><h2>얼굴 검사 로그</h2><span>{{ loading() ? '불러오는 중…' : pageNumber + ' 페이지' }}</span></div>
+  <section class="card recognition-log-list"><div class="log-list-heading"><h2>얼굴 검사 로그</h2><div class="log-list-tools"><span>{{ loading() ? '불러오는 중…' : pageNumber + ' 페이지' }}</span>@if (canDelete) {<button type="button" class="btn btn-outline-danger" (click)="deleteAll()" [disabled]="loading() || deleting()">{{ deleting() ? '삭제 중…' : '전체 로그 삭제' }}</button>}</div></div>
     <div class="table-responsive"><table class="table recognition-log-table align-middle"><thead><tr><th>검사 시각</th><th>카메라 / 추적</th><th>결과 / 제외 사유</th><th>품질</th><th>비교 점수</th><th>비교 사진</th><th>세부 정보</th></tr></thead><tbody>
       @for (item of logs.items; track item.id) {
         <tr><td class="text-nowrap">{{ item.captured_at | date:'MM-dd HH:mm:ss.SSS' }}</td><td><strong>{{ item.camera_name }}</strong><small class="d-block">추적 #{{ item.track_id }} · 프레임 {{ item.frame_id }}</small></td>
@@ -23,7 +24,7 @@
         </tr>
       } @empty {<tr><td colspan="7" class="empty-state">조건에 맞는 얼굴 검사 로그가 없습니다.<small class="d-block">Live Search에서 분석을 시작하면 검사 결과가 기록됩니다.</small></td></tr>}
     </tbody></table></div>
-    <div class="log-actions"><button class="btn btn-outline-secondary" (click)="previous()" [disabled]="loading() || pageNumber === 1">앞 페이지</button><button class="btn btn-outline-secondary" (click)="next()" [disabled]="loading() || !logs.has_more">이전 기록</button><button class="btn btn-outline-primary ms-auto" (click)="latest()" [disabled]="loading()">최신 기록</button></div>
+    <div class="log-actions"><button class="btn btn-outline-secondary" (click)="previous()" [disabled]="loading() || deleting() || pageNumber === 1">앞 페이지</button><button class="btn btn-outline-secondary" (click)="next()" [disabled]="loading() || deleting() || !logs.has_more">이전 기록</button><button class="btn btn-outline-primary ms-auto" (click)="latest()" [disabled]="loading() || deleting()">최신 기록</button></div>
     <small class="text-secondary mt-3">로그는 최근 {{ logs.retention_days }}일, 최대 {{ logs.max_records | number }}건을 보관합니다. 사진과 얼굴 특징은 이 로그에 저장하지 않습니다.</small>
   </section>
 } @else if (loading()) {<p role="status">로그를 불러오고 있습니다.</p>}

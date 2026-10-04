@@ -44,7 +44,7 @@
           }
         </section>
       } @else if (view() === 'logs') {
-        <app-recognition-logs [cameras]="cameras()" [refreshVersion]="controlsRefresh()" (sessionExpired)="clearSession()" />
+        <app-recognition-logs [cameras]="cameras()" [requestHeaders]="headers()" [canDelete]="user()?.role === 'admin'" [refreshVersion]="controlsRefresh()" (sessionExpired)="clearSession()" />
       } @else if (view() === 'settings') {
         <app-function-settings [requestHeaders]="headers()" [canEdit]="user()?.role === 'admin'" [refreshVersion]="controlsRefresh()" (sessionExpired)="clearSession()" (savingChange)="busy.set($event)" />
       } @else if (view() === 'persons') {

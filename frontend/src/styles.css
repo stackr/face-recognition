@@ -56,6 +56,9 @@
 .log-filter-fields {display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)); gap: 14px;}
 .log-actions {display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 18px; font-size: 12px;}
 .log-actions .form-check {margin-bottom: 0;}
+.log-list-heading {flex-wrap: wrap; gap: 12px;}
+.log-list-tools {display: flex; flex-wrap: wrap; align-items: center; gap: 12px;}
+.log-list-tools .btn {font-size: 12px;}
 .log-counts {display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px;}
 .log-counts span, .log-counts > strong {padding: 8px 12px; border-radius: 6px; background: var(--surface-raised);}
 .log-counts b {margin-left: 6px; color: var(--ink);}
