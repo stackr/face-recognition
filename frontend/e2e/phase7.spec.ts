@@ -3,7 +3,7 @@ import {mkdirSync, readFileSync} from 'node:fs';
 
 test.use({actionTimeout: 10000, navigationTimeout: 20000});
 
-test('Live Search 3열, 현재 등록·검출 사진, 필터, 카메라 URL 복원 및 모바일', async ({page, request}) => {
+test('Live Search 상단 전체 너비 영상, 얼굴 카드, 필터, 카메라 URL 복원 및 모바일', async ({page, request}) => {
   test.setTimeout(120000);
   const credentials = readFileSync('../data/local-admin.txt', 'utf8');
   const prefix = `LIVE7-E2E-${Date.now()}`;
@@ -13,6 +13,9 @@ test('Live Search 3열, 현재 등록·검출 사진, 필터, 카메라 URL 복�
   let headers: Record<string, string> | undefined;
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
+  page.on('console', message => {
+    if (message.type() === 'error' && message.text().startsWith('ERROR')) errors.push(message.text().split('\n')[0]);
+  });
   await page.setViewportSize({width: 1600, height: 1000});
   await page.goto('/');
   await page.getByLabel('아이디', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
@@ -58,8 +61,16 @@ test('Live Search 3열, 현재 등록·검출 사진, 필터, 카메라 URL 복�
     expect(boxes.every(box => box !== null)).toBe(true);
     expect(boxes[0]!.x + boxes[0]!.width).toBeLessThan(boxes[1]!.x);
     expect(boxes[1]!.x + boxes[1]!.width).toBeLessThan(boxes[2]!.x);
+    const layout = page.locator('.live-search-layout');
+    const previewCard = page.locator('.live-preview .preview-card');
+    const layoutBox = (await layout.boundingBox())!;
+    const previewBox = (await previewCard.boundingBox())!;
+    expect(previewBox.x).toBeCloseTo(layoutBox.x, 0);
+    expect(previewBox.width).toBeCloseTo(layoutBox.width, 0);
+    for (const box of boxes) expect(box!.y).toBeGreaterThan(previewBox.y + previewBox.height);
+    await expect(previewCard.getByRole('heading')).toHaveText(`${prefix}-A`);
+    await expect(page.locator('.live-detection-confidence')).toHaveText('—');
     mkdirSync('../data/screenshots', {recursive:true});
-    await page.locator('.live-search-layout').screenshot({path:'../data/screenshots/phase7-layout-desktop.png'});
 
     await page.getByRole('button', {name:'분석 시작', exact:true}).click();
     await expect(page.locator('.analysis-state')).toHaveText('분석 중', {timeout:20000});
@@ -73,13 +84,36 @@ test('Live Search 3열, 현재 등록·검출 사진, 필터, 카메라 URL 복�
     }
     await expect(page.locator('.candidate-track').first()).toBeVisible();
     await expect(page.locator('.candidate-count')).not.toHaveText('유사도 후보 0명');
+    const faces = page.locator('.faces-panel .face-card');
+    await expect.poll(() => faces.count()).toBeGreaterThan(1);
+    const faceBoxes = await Promise.all([faces.nth(0), faces.nth(1)].map(face => face.boundingBox()));
+    expect(faceBoxes[0]!.y).toBeCloseTo(faceBoxes[1]!.y, 0);
+    expect(faceBoxes[0]!.x + faceBoxes[0]!.width).toBeLessThan(faceBoxes[1]!.x);
+    const firstFace = faces.first();
+    const photoBox = (await firstFace.locator('img, .face-empty').boundingBox())!;
+    const detailsBox = (await firstFace.locator('.face-details').boundingBox())!;
+    expect(detailsBox.y).toBeGreaterThan(photoBox.y + photoBox.height);
+    await layout.screenshot({path:'../data/screenshots/phase7-layout-desktop.png'});
+    await page.setViewportSize({width:390, height:844});
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    const mobileLayoutBox = (await layout.boundingBox())!;
+    const mobilePreviewBox = (await previewCard.boundingBox())!;
+    expect(mobilePreviewBox.width).toBeCloseTo(mobileLayoutBox.width, 0);
+    const mobileFaceBoxes = await Promise.all([faces.nth(0), faces.nth(1)].map(face => face.boundingBox()));
+    expect(mobileFaceBoxes[0]!.x).toBeCloseTo(mobileFaceBoxes[1]!.x, 0);
+    expect(mobileFaceBoxes[1]!.y).toBeGreaterThan(mobileFaceBoxes[0]!.y + mobileFaceBoxes[0]!.height);
+    await page.locator('.faces-panel').screenshot({path:'../data/screenshots/phase7-faces-mobile.png'});
+    await page.setViewportSize({width:1600, height:1000});
     const state = await (await page.request.get(`/api/cameras/${firstCamera}/status`)).json();
     expect(state.actual_device).toMatch(/^cuda(?::\d+)?$/);
     expect((await request.get(referencePath)).status()).toBe(401);
     await page.getByRole('button', {name:'분석 중지', exact:true}).click();
     await expect(page.locator('.analysis-state')).toHaveText('중지됨');
+    await expect(faces).toHaveCount(0);
+    await expect(page.locator('.live-detection-confidence')).toHaveText('—');
 
     await panel.getByLabel('이벤트 상태', {exact:true}).selectOption('confirmed');
+    await expect(panel.getByLabel('이벤트 상태', {exact:true})).toHaveValue('confirmed');
     await expect(card).toHaveCount(0);
     await expect(panel.locator('.event-empty')).toContainText('조건에 맞는 이벤트가 없습니다.');
     await panel.getByLabel('이벤트 상태', {exact:true}).selectOption('candidate');
@@ -93,6 +127,7 @@ test('Live Search 3열, 현재 등록·검출 사진, 필터, 카메라 URL 복�
     await other.click();
     await expect(page).toHaveURL(new RegExp(`#/live/${secondCamera}$`));
     await expect(other).toHaveAttribute('aria-pressed', 'true');
+    await expect(previewCard.getByRole('heading')).toHaveText(`${prefix}-B`);
     await expect(card).toHaveCount(0);
     await panel.getByLabel('카메라 범위', {exact:true}).selectOption('all');
     await expect(card).toHaveCount(1);
@@ -138,6 +173,9 @@ test('Live Search 3열, 현재 등록·검출 사진, 필터, 카메라 URL 복�
     await expect(page.getByRole('alert')).toContainText('카메라를 찾을 수 없거나 영상 접근 권한이 없습니다.');
     await expect(page.locator('.preview-screen')).toHaveCount(0);
     expect(errors).toEqual([]);
+  } catch (error) {
+    await page.locator('.live-search-layout').screenshot({path:'../data/screenshots/phase7-layout-failed.png'});
+    throw error;
   } finally {
     // Keep the initial session for cleanup; no extra login consumes the rate limit.
     try {

@@ -52,3 +52,23 @@ npm run test:e2e
 ```
 
 GPU 기능 시험은 다른 benchmark와 동시에 실행하지 않는다. 짧은 시간에 E2E를 반복할 때 로그인 제한(동일 IP 5분에 10회)을 고려하며 시험 때문에 제한을 낮추지 않는다. 공개 자료의 pipeline smoke이며 정확도 보정/실제 CCTV 정확도/장시간 부하 검증을 의미하지 않는다. 모델/가중치/이용 조건은 기존 [models.md](models.md)를 따른다. 다음 개발 범위는 Phase 8 이벤트 전후 영상 클립이다.
+
+## 2026-10-04 Live Search 화면 배치 변경
+
+선택한 카메라의 영상 박스(사용자 카메라 이름 `Face`)를 화면 맨 위로 이동해 한 열로 전체 콘텐츠 너비를 사용한다. 영상 비율을 유지하고 높이를 화면 높이의 65%로 제한한다. CCTV 목록, 분석 설정·얼굴 분석, 검색 이벤트는 영상 아래에 배치한다. 카메라를 바꾸면 상단 영상의 제목과 입력도 함께 바뀐다.
+
+추적별 얼굴 분석 목록은 얼굴 사진을 위에, 추적 번호·품질·비교 사진 수·후보 정보를 아래에 담은 카드 격자로 표시한다. 화면 너비에 따라 카드 열 수를 조정하며 390 px 모바일에서는 한 열로 표시한다. 인물 등록 화면의 얼굴 목록 스타일은 유지한다.
+
+검증 중 분석 전이나 중지 후 검출 점수가 비어 있을 때 템플릿이 오류를 내고 후속 화면 갱신을 중단하는 문제를 발견했다. 점수가 없으면 `—`를 표시하도록 수정했다. 기존 Live Search 브라우저 시험에 상단 영상의 너비·위치, 얼굴 카드의 가로 배열과 사진·정보 순서, 모바일 배열 및 Angular 콘솔 오류 검사를 반영했다. 분석 중지 후 얼굴 목록 정리와 이벤트 필터, 카메라 URL 복원·접근 권한 검사도 통과했다.
+
+TypeScript 검사, Angular production build(618.07 kB), frontend 논리 19건, 실제 Chrome의 Live Search·전체 페이지 다크 테마 2건을 통과했다. 실제 CUDA와 공개 시험 영상으로 화면을 검증했으며, 데스크톱 및 모바일 캡처를 직접 확인했다. 프런트엔드 서비스의 자동 재빌드로 반영했고 기존 카메라 3개·인물 2명·기능 설정·카메라 실행 상태를 보존했다. 임시 시험 인물과 카메라는 삭제했다. 이번 변경은 프런트엔드에 한정하며 DB migration이나 모델 변경은 없다.
+
+검증 요약은 `data/reports/live-layout-regression.json`, 화면은 `data/screenshots/phase7-layout-desktop.png`, `phase7-faces-mobile.png`, `phase7-comparison-mobile.png`에 보관한다.
+
+```bash
+npm --prefix frontend run typecheck
+npm --prefix frontend run build
+cd frontend
+node --test tests/*.test.mjs
+npx playwright test e2e/phase7.spec.ts e2e/dark-theme.spec.ts
+```

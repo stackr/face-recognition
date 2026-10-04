@@ -135,6 +135,7 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: -appl
 
 .live-workspace {max-width: none; padding: 28px;}
 .live-search-layout {display: grid; grid-template-columns: 190px minmax(340px, 1fr) 340px; gap: 18px; align-items: start;}
+.live-preview {grid-column: 1 / -1; min-width: 0;}
 .live-camera-list, .live-main, app-event-panel {min-width: 0;}
 .live-camera-list {padding: 18px 14px; position: sticky; top: 20px;}
 .live-camera-heading h2 {font-size: 18px; font-weight: 650; margin: 8px 0 18px;}
@@ -151,14 +152,17 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: -appl
 .live-main .analysis-controls {padding: 20px; margin-bottom: 18px;}
 .live-main .analysis-actions {gap: 10px; margin-top: 14px;}
 .live-main .analysis-actions .btn {font-size: 13px;}
-.live-main .live-grid {grid-template-columns: minmax(0, 1fr); gap: 18px;}
-.live-main .preview-heading {padding: 18px; gap: 12px;}
-.live-main .preview-heading h2 {overflow-wrap: anywhere;}
-.live-main .preview-screen {min-height: 240px;}
+.live-preview .preview-heading {padding: 18px; gap: 12px;}
+.live-preview .preview-heading h2 {overflow-wrap: anywhere;}
+.live-preview .preview-screen {min-height: 240px;}
+.live-preview .preview-screen img {max-height: 65vh; object-fit: contain;}
 .live-legend {display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 0 18px 12px; font-size: 11px; color: var(--muted);}
 .candidate-count {color: var(--warning); background: var(--warning-soft); border-radius: 5px; padding: 2px 7px;}
 .live-main .faces-panel {padding: 18px; margin-top: 18px;}
-.live-main .face-grid {grid-template-columns: minmax(0, 1fr);}
+.live-main .face-grid {grid-template-columns: repeat(auto-fill, minmax(min(100%, 180px), 1fr));}
+.live-main .face-card {flex-direction: column; min-width: 0; gap: 14px;}
+.live-main .face-card img, .live-main .face-empty {align-self: center;}
+.live-main .face-empty {background: var(--page);}
 .face-details {min-width: 0; overflow-wrap: anywhere;}
 .candidate-track {border-color: var(--warning-border); background: var(--warning-soft);}
 .candidate-label {color: var(--warning); font-size: 12px; margin-top: 8px;}
@@ -215,10 +219,10 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: -appl
 }
 @media (max-width: 600px) {
   .live-workspace {padding: 24px 16px;}
-  .live-main .preview-screen {min-height: 200px;}
+  .live-preview .preview-screen {min-height: 200px;}
   .live-main .metrics-card dl {grid-template-columns: 1fr auto;}
   .live-main .analysis-controls {padding: 16px;}
-  .live-main .preview-heading {flex-wrap: wrap;}
+  .live-preview .preview-heading {flex-wrap: wrap;}
   .event-card-heading {flex-wrap: wrap;}
 }
 
