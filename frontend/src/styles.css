@@ -188,12 +188,12 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: -appl
 .event-list-actions {display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0 14px;}
 .event-list-actions .btn, .event-list-actions small {font-size: 11px;}
 .event-list-actions small {color: var(--muted);}
-.event-grid {grid-template-columns: minmax(0, 1fr); gap: 12px; max-height: 78vh; overflow-y: auto;}
+.event-grid {grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; max-height: 78vh; overflow-y: auto;}
 .event-card {display: block; padding: 14px; border-radius: 9px; background: var(--warning-soft); border-color: var(--warning-border);}
 .event-card.event-confirmed {background: var(--success-soft); border-color: var(--success-border);}
 .event-card.event-rejected {background: var(--surface-raised); border-color: var(--border);}
-.event-card-heading {display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;}
-.event-card-heading > strong {font-size: 13px;}
+.event-card-heading {display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px;}
+.event-card-heading > strong {font-size: 13px; min-width: 0; overflow-wrap: anywhere;}
 .event-status {font-size: 10px; white-space: nowrap; border-radius: 4px; padding: 3px 5px; background: var(--warning-soft); color: var(--warning);}
 .event-confirmed .event-status {background: var(--success-soft); color: var(--success);}
 .event-rejected .event-status {background: var(--surface-raised); color: var(--muted);}
@@ -209,6 +209,7 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: -appl
 .event-empty {font-size: 12px; color: var(--muted); text-align: center; line-height: 1.8; padding: 30px 10px; background: var(--surface-raised); border-radius: 8px;}
 .events-panel > .face-note {display: block; margin-top: 16px; line-height: 1.8;}
 @media (max-width: 1280px) {
+  .event-grid {grid-template-columns: repeat(2, minmax(0, 1fr));}
   .live-search-layout {grid-template-columns: minmax(0, 1fr) 400px; grid-template-areas: "preview analysis" "cameras analysis" "events analysis";}
   .live-camera-list {position: static;}
   .live-camera-heading h2 {margin-bottom: 12px;}
@@ -217,9 +218,10 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: -appl
 }
 @media (max-width: 1100px) {
   .live-search-layout {grid-template-columns: minmax(0, 1fr); grid-template-areas: "preview" "analysis" "cameras" "events";}
-  .event-grid {max-height: none; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));}
+  .event-grid {max-height: none;}
 }
 @media (max-width: 600px) {
+  .event-grid {grid-template-columns: minmax(0, 1fr);}
   .live-workspace {padding: 24px 16px;}
   .live-preview .preview-screen {min-height: 200px;}
   .live-main .metrics-card dl {grid-template-columns: 1fr auto;}

@@ -55,6 +55,7 @@ test('Live Search 영상·가운데 이벤트·오른쪽 분석 배치, 얼굴 �
     await expect(selected).toHaveAttribute('aria-pressed', 'true');
     await expect(other).toBeVisible();
     const panel = page.locator('app-event-panel');
+    const eventColumns = () => panel.locator('.event-grid').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);
     await expect(panel.getByRole('status')).toHaveText('연결됨', {timeout:15000});
     await panel.getByLabel('인물 이름', {exact:true}).fill(personName);
     const boxes = await Promise.all([cameras, page.locator('.live-main'), panel].map(locator => locator.boundingBox()));
@@ -85,6 +86,7 @@ test('Live Search 영상·가운데 이벤트·오른쪽 분석 배치, 얼굴 �
     await expect.poll(() => preview.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
     const card = panel.locator('.event-card').filter({hasText:personName});
     await expect(card).toHaveCount(1, {timeout:30000});
+    expect(await eventColumns()).toBe(3);
     await card.scrollIntoViewIfNeeded();
     for (const selector of ['.event-reference-image', '.event-detected-image']) {
       await expect.poll(() => card.locator(selector).evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(112);
@@ -102,12 +104,14 @@ test('Live Search 영상·가운데 이벤트·오른쪽 분석 배치, 얼굴 �
     expect(detailsBox.y).toBeGreaterThan(photoBox.y + photoBox.height);
     await layout.screenshot({path:'../data/screenshots/phase7-layout-desktop.png'});
     await page.setViewportSize({width:1280, height:900});
+    expect(await eventColumns()).toBe(2);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
     const tabletPreviewBox = (await previewCard.boundingBox())!;
     const tabletControlsBox = (await page.locator('.analysis-controls').boundingBox())!;
     expect(tabletPreviewBox.x + tabletPreviewBox.width).toBeLessThan(tabletControlsBox.x);
     expect(tabletControlsBox.y).toBeCloseTo(tabletPreviewBox.y, 0);
     await page.setViewportSize({width:390, height:844});
+    expect(await eventColumns()).toBe(1);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     const mobileLayoutBox = (await layout.boundingBox())!;
     const mobilePreviewBox = (await previewCard.boundingBox())!;
