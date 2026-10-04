@@ -3,7 +3,7 @@ import {mkdirSync, readFileSync} from 'node:fs';
 
 test.use({actionTimeout: 10000, navigationTimeout: 20000});
 
-test('Live Search 상단 전체 너비 영상, 얼굴 카드, 필터, 카메라 URL 복원 및 모바일', async ({page, request}) => {
+test('Live Search 영상·가운데 이벤트·오른쪽 분석 배치, 얼굴 카드, 필터 및 모바일', async ({page, request}) => {
   test.setTimeout(120000);
   const credentials = readFileSync('../data/local-admin.txt', 'utf8');
   const prefix = `LIVE7-E2E-${Date.now()}`;
@@ -59,15 +59,22 @@ test('Live Search 상단 전체 너비 영상, 얼굴 카드, 필터, 카메라 
     await panel.getByLabel('인물 이름', {exact:true}).fill(personName);
     const boxes = await Promise.all([cameras, page.locator('.live-main'), panel].map(locator => locator.boundingBox()));
     expect(boxes.every(box => box !== null)).toBe(true);
-    expect(boxes[0]!.x + boxes[0]!.width).toBeLessThan(boxes[1]!.x);
-    expect(boxes[1]!.x + boxes[1]!.width).toBeLessThan(boxes[2]!.x);
+    expect(boxes[0]!.x + boxes[0]!.width).toBeLessThan(boxes[2]!.x);
+    expect(boxes[2]!.x + boxes[2]!.width).toBeLessThan(boxes[1]!.x);
     const layout = page.locator('.live-search-layout');
     const previewCard = page.locator('.live-preview .preview-card');
     const layoutBox = (await layout.boundingBox())!;
     const previewBox = (await previewCard.boundingBox())!;
     expect(previewBox.x).toBeCloseTo(layoutBox.x, 0);
-    expect(previewBox.width).toBeCloseTo(layoutBox.width, 0);
-    for (const box of boxes) expect(box!.y).toBeGreaterThan(previewBox.y + previewBox.height);
+    expect(previewBox.x + previewBox.width).toBeCloseTo(boxes[2]!.x + boxes[2]!.width, 0);
+    expect(previewBox.x + previewBox.width).toBeLessThan(boxes[1]!.x);
+    expect(boxes[1]!.y).toBeCloseTo(previewBox.y, 0);
+    for (const box of [boxes[0], boxes[2]]) expect(box!.y).toBeGreaterThan(previewBox.y + previewBox.height);
+    for (const selector of ['.analysis-controls', '.metrics-card', '.faces-panel']) {
+      const rightPanelBox = (await page.locator(selector).boundingBox())!;
+      expect(rightPanelBox.x).toBeCloseTo(boxes[1]!.x, 0);
+      expect(rightPanelBox.width).toBeCloseTo(boxes[1]!.width, 0);
+    }
     await expect(previewCard.getByRole('heading')).toHaveText(`${prefix}-A`);
     await expect(page.locator('.live-detection-confidence')).toHaveText('—');
     mkdirSync('../data/screenshots', {recursive:true});
@@ -94,6 +101,12 @@ test('Live Search 상단 전체 너비 영상, 얼굴 카드, 필터, 카메라 
     const detailsBox = (await firstFace.locator('.face-details').boundingBox())!;
     expect(detailsBox.y).toBeGreaterThan(photoBox.y + photoBox.height);
     await layout.screenshot({path:'../data/screenshots/phase7-layout-desktop.png'});
+    await page.setViewportSize({width:1280, height:900});
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
+    const tabletPreviewBox = (await previewCard.boundingBox())!;
+    const tabletControlsBox = (await page.locator('.analysis-controls').boundingBox())!;
+    expect(tabletPreviewBox.x + tabletPreviewBox.width).toBeLessThan(tabletControlsBox.x);
+    expect(tabletControlsBox.y).toBeCloseTo(tabletPreviewBox.y, 0);
     await page.setViewportSize({width:390, height:844});
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     const mobileLayoutBox = (await layout.boundingBox())!;

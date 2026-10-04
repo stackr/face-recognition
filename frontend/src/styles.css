@@ -134,10 +134,12 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: -appl
 @media (max-width: 480px) {.event-card {flex-direction: column;}}
 
 .live-workspace {max-width: none; padding: 28px;}
-.live-search-layout {display: grid; grid-template-columns: 190px minmax(340px, 1fr) 340px; gap: 18px; align-items: start;}
-.live-preview {grid-column: 1 / -1; min-width: 0;}
+.live-search-layout {display: grid; grid-template-columns: 190px minmax(340px, 1fr) minmax(400px, 440px); grid-template-areas: "preview preview analysis" "cameras events analysis"; gap: 18px; align-items: start;}
+.live-preview {grid-area: preview; min-width: 0;}
+.live-main {grid-area: analysis;}
+.live-search-layout > app-event-panel {grid-area: events;}
 .live-camera-list, .live-main, app-event-panel {min-width: 0;}
-.live-camera-list {padding: 18px 14px; position: sticky; top: 20px;}
+.live-camera-list {grid-area: cameras; padding: 18px 14px; position: sticky; top: 20px;}
 .live-camera-heading h2 {font-size: 18px; font-weight: 650; margin: 8px 0 18px;}
 .live-camera-total {display: block; color: var(--muted); font-size: 11px; margin: 12px 0;}
 .live-camera-items {display: grid; gap: 8px; max-height: 65vh; overflow-y: auto;}
@@ -206,15 +208,15 @@ body { margin: 0; background: var(--page); color: var(--ink); font-family: -appl
 .event-actions .btn {font-size: 11px;}
 .event-empty {font-size: 12px; color: var(--muted); text-align: center; line-height: 1.8; padding: 30px 10px; background: var(--surface-raised); border-radius: 8px;}
 .events-panel > .face-note {display: block; margin-top: 16px; line-height: 1.8;}
-@media (max-width: 1200px) {
-  .live-search-layout {grid-template-columns: minmax(0, 1fr) 310px;}
-  .live-camera-list {grid-column: 1 / -1; position: static;}
+@media (max-width: 1280px) {
+  .live-search-layout {grid-template-columns: minmax(0, 1fr) 400px; grid-template-areas: "preview analysis" "cameras analysis" "events analysis";}
+  .live-camera-list {position: static;}
   .live-camera-heading h2 {margin-bottom: 12px;}
   .live-camera-items {display: flex; overflow-x: auto; max-height: none; padding-bottom: 4px;}
   .live-camera-item {flex: 0 0 180px;}
 }
 @media (max-width: 1100px) {
-  .live-search-layout {grid-template-columns: minmax(0, 1fr);}
+  .live-search-layout {grid-template-columns: minmax(0, 1fr); grid-template-areas: "preview" "analysis" "cameras" "events";}
   .event-grid {max-height: none; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));}
 }
 @media (max-width: 600px) {
