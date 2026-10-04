@@ -115,6 +115,7 @@
         </div>
       } @else if (view() === 'live') {
         <div class="live-search-layout">
+        <div class="live-feed">
         @if (selectedCamera()) {
           <div class="live-preview">
             @if (analysisError()) {<div class="alert alert-warning" role="alert">{{ analysisError() }}</div>}
@@ -126,6 +127,8 @@
             </section>
           </div>
         }
+        <app-event-panel [requestHeaders]="headers()" [selectedCameraId]="selectedCamera()?.camera_id ?? null" [references]="persons()" (sessionExpired)="clearSession()" />
+        </div>
         <div class="live-main">
         <section class="card analysis-controls">
           <label for="live-camera" class="form-label">카메라</label>
@@ -168,7 +171,6 @@
         }
         @if (!selectedCamera()) {<section class="card live-empty"><h2>카메라를 선택하세요</h2><p>카메라 선택 상자에서 선택하면 영상과 추적별 얼굴 후보를 확인할 수 있습니다.</p></section>}
         </div>
-        <app-event-panel [requestHeaders]="headers()" [selectedCameraId]="selectedCamera()?.camera_id ?? null" [references]="persons()" (sessionExpired)="clearSession()" />
         </div>
       }
     </main>

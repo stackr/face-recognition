@@ -69,6 +69,11 @@ test('Live Search 영상·가운데 이벤트·오른쪽 분석 배치, 얼굴 �
     expect(boxes[1]!.x + boxes[1]!.width).toBeLessThan(boxes[0]!.x);
     const layout = page.locator('.live-search-layout');
     const previewCard = page.locator('.live-preview .preview-card');
+    const expectVideoEventGap = async () => {
+      const video = (await page.locator('.live-preview').boundingBox())!;
+      const events = (await panel.boundingBox())!;
+      expect(events.y - video.y - video.height).toBeCloseTo(18, 0);
+    };
     const layoutBox = (await layout.boundingBox())!;
     const previewBox = (await previewCard.boundingBox())!;
     expect(previewBox.x).toBeCloseTo(layoutBox.x, 0);
@@ -76,6 +81,12 @@ test('Live Search 영상·가운데 이벤트·오른쪽 분석 배치, 얼굴 �
     expect(previewBox.x + previewBox.width).toBeLessThan(boxes[0]!.x);
     expect(boxes[0]!.y).toBeCloseTo(previewBox.y, 0);
     expect(boxes[1]!.y).toBeGreaterThan(previewBox.y + previewBox.height);
+    await expectVideoEventGap();
+    await page.locator('.metrics-card summary').click();
+    await expect(page.locator('.metrics-card')).toHaveAttribute('open', '');
+    await expectVideoEventGap();
+    await page.locator('.metrics-card summary').click();
+    await expectVideoEventGap();
     for (const selector of ['.analysis-controls', '.metrics-card', '.faces-panel']) {
       const rightPanelBox = (await page.locator(selector).boundingBox())!;
       expect(rightPanelBox.x).toBeCloseTo(boxes[0]!.x, 0);
@@ -114,6 +125,9 @@ test('Live Search 영상·가운데 이벤트·오른쪽 분석 배치, 얼굴 �
     const detailsBox = (await firstFace.locator('.face-details').boundingBox())!;
     expect(detailsBox.y).toBeGreaterThan(photoBox.y + photoBox.height);
     await layout.screenshot({path:'../data/screenshots/phase7-layout-desktop.png'});
+    await page.locator('.metrics-card summary').click();
+    await expectVideoEventGap();
+    await page.locator('.metrics-card summary').click();
     await page.setViewportSize({width:1280, height:900});
     expect(await eventColumns()).toBe(2);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
@@ -121,8 +135,10 @@ test('Live Search 영상·가운데 이벤트·오른쪽 분석 배치, 얼굴 �
     const tabletControlsBox = (await page.locator('.analysis-controls').boundingBox())!;
     expect(tabletPreviewBox.x + tabletPreviewBox.width).toBeLessThan(tabletControlsBox.x);
     expect(tabletControlsBox.y).toBeCloseTo(tabletPreviewBox.y, 0);
+    await expectVideoEventGap();
     await page.setViewportSize({width:390, height:844});
     expect(await eventColumns()).toBe(1);
+    await expectVideoEventGap();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     const mobileLayoutBox = (await layout.boundingBox())!;
     const mobilePreviewBox = (await previewCard.boundingBox())!;
