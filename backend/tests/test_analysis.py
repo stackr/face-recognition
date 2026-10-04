@@ -98,9 +98,14 @@ def test_mp4_upload_is_private_bounded_and_preserves_rtsp(app_context, admin_hea
         == 413
     )
     response = client.put(
-        path, content=b"unit-test-mp4", headers={**admin_headers, "Content-Type": "video/mp4"}
+        path,
+        params={"filename": "C:\\videos\\시험 영상.mp4"},
+        content=b"unit-test-mp4",
+        headers={**admin_headers, "Content-Type": "video/mp4"},
     )
     assert response.status_code == 200 and response.json()["has_test_video"]
+    assert response.json()["video_filename"] == "시험 영상.mp4"
+    assert client.get(f"/api/cameras/{camera_id}").json()["video_filename"] == "시험 영상.mp4"
     assert response.json()["source_type"] == "rtsp" and "video_path" not in response.text
     with Session(engine) as db:
         stored = db.get(Camera, camera_id)
@@ -110,13 +115,17 @@ def test_mp4_upload_is_private_bounded_and_preserves_rtsp(app_context, admin_hea
     replace_worker(client, lambda request: httpx.Response(422))
     assert (
         client.put(
-            path, content=b"invalid-video", headers={**admin_headers, "Content-Type": "video/mp4"}
+            path,
+            params={"filename": "invalid.mp4"},
+            content=b"invalid-video",
+            headers={**admin_headers, "Content-Type": "video/mp4"},
         ).status_code
         == 422
     )
     assert len(list(settings.video_dir.glob("*.mp4"))) == 1
     with Session(engine) as db:
         assert db.get(Camera, camera_id).rtsp_url_encrypted == encrypted
+        assert db.get(Camera, camera_id).video_filename == "시험 영상.mp4"
     replace_worker(client, lambda request: httpx.Response(404))
     assert client.delete(f"/api/cameras/{camera_id}", headers=admin_headers).status_code == 204
     assert not list(settings.video_dir.glob("*.mp4"))

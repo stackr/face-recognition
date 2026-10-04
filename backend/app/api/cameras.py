@@ -27,6 +27,9 @@ def output(camera: Camera, request: Request, db: Session, user: User) -> CameraO
         else "",
         source_type=camera.source_type,
         has_test_video=bool(camera.video_path),
+        video_filename=camera.video_filename
+        if camera.video_path and (user.role == "admin" or grant is not None)
+        else None,
         location=camera.location,
         enabled=camera.enabled,
         can_view=user.role == "admin" or grant is not None,

@@ -39,6 +39,7 @@ class Camera(Base):
     rtsp_url_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
     source_type: Mapped[str] = mapped_column(String(8), default="rtsp", nullable=False)
     video_path: Mapped[str | None] = mapped_column(String(255))
+    video_filename: Mapped[str | None] = mapped_column(String(255))
     location: Mapped[str] = mapped_column(String(255), default="", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now, nullable=False)

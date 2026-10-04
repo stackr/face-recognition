@@ -76,6 +76,7 @@ class CameraOutput(BaseModel):
     rtsp_url: str  # Credentials and query parameters are always removed.
     source_type: str
     has_test_video: bool
+    video_filename: str | None = None
     location: str
     enabled: bool
     can_view: bool

@@ -153,7 +153,12 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
     await page.locator('app-recognition-logs').screenshot({path:'../data/screenshots/recognition-logs-desktop.png'});
     await page.getByLabel('검사 결과', {exact:true}).selectOption('quality_rejected');
     await page.getByRole('button', {name:'조회', exact:true}).click();
-    await expect(page.locator('.recognition-log-table tbody')).toContainText('품질 기준 미달');
+    // Uploaded face mode uses the face-test alignment rules without the person-mode quality gate.
+    await expect(page.locator('.recognition-log-table tbody')).toContainText(
+      originalValues.person_detection_enabled === false
+        ? '조건에 맞는 얼굴 검사 로그가 없습니다.'
+        : '품질 기준 미달'
+    );
     await page.reload();
     await expect(page.getByRole('heading', {name:'로그', exact:true})).toBeVisible();
     await page.getByLabel('로그 카메라', {exact:true}).selectOption(String(cameraId));
@@ -175,14 +180,20 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
     await expect.poll(async () => {
       const state = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
       return state.state === 'running' && state.stream_session_id === before.stream_session_id
-        && state.result?.detection_confidence === 1 && state.result.tracks.length === 0;
+        && state.result?.detection_confidence === 1
+        && (originalValues?.person_detection_enabled === false
+          ? state.result.detection_mode === 'face' && state.result.tracks.length > 0
+          : state.result.tracks.length === 0);
     }).toBe(true);
     expect((await page.request.get(`/api/events/${eventId}`)).status()).toBe(200);
     await page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button', {name:'Live Search'}).click();
-    await page.getByLabel('분석할 카메라', {exact:true}).selectOption({label:prefix});
+    await page.getByLabel('카메라', {exact:true}).selectOption({label:prefix});
     await page.getByText('상세 분석 지표', {exact:true}).click();
-    await expect(page.locator('.live-detection-confidence')).toHaveText('1.00');
-    await expect(page.locator('.metrics-card')).toContainText('0명');
+    const faceOnly = originalValues.person_detection_enabled === false;
+    await expect(page.locator('.live-detection-confidence')).toHaveText(
+      faceOnly ? Number(originalValues.video_face_detection_threshold).toFixed(2) : '1.00'
+    );
+    await expect(page.locator('.metrics-card')).toContainText(faceOnly ? '얼굴 수' : '0명');
     await page.screenshot({path:'../data/screenshots/person-confidence-live.png'});
     await page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button', {name:'기능 설정'}).click();
     await personThreshold.fill('0.2');

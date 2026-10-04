@@ -1,7 +1,7 @@
 import {expect, test} from '@playwright/test';
 import {mkdirSync, readFileSync} from 'node:fs';
 
-test('MP4 업로드, GPU 사람 탐지, 인증 미리보기와 시작·중지', async ({page, request}) => {
+test('MP4 업로드, GPU 분석, 인증 미리보기와 시작·중지', async ({page, request}) => {
   test.setTimeout(60000);
   const credentials = readFileSync('../data/local-admin.txt', 'utf8');
   await page.goto('/');
@@ -11,6 +11,7 @@ test('MP4 업로드, GPU 사람 탐지, 인증 미리보기와 시작·중지', 
   await expect(page.getByRole('heading', {name:'시스템 준비 상태'})).toBeVisible();
   const auth = await (await page.request.get('/api/auth/me')).json();
   const headers = {'X-CSRF-Token':auth.csrf_token};
+  const controls = await (await page.request.get('/api/function-settings')).json();
   const name = `MP4-E2E-${Date.now()}`;
   let cameraId: number | undefined;
   try {
@@ -32,13 +33,18 @@ test('MP4 업로드, GPU 사람 탐지, 인증 미리보기와 시작·중지', 
     await row.getByRole('button', {name:'영상 분석', exact:true}).click();
     await page.getByLabel('시험 MP4 업로드').setInputFiles('../data/videos/people.mp4');
     await expect(page.getByText('시험 영상을 업로드했습니다. 분석 시작을 눌러 주세요.')).toBeVisible();
-    await expect(page.getByLabel('분석할 카메라').locator('option:checked')).toHaveText(name);
+    await expect(page.getByLabel('카메라', {exact:true}).locator('option:checked')).toHaveText(name);
     await page.getByRole('button', {name:'분석 시작', exact:true}).click();
     await expect(page.locator('.analysis-state')).toHaveText('분석 중', {timeout:15000});
     const image = page.getByAltText('사람 탐지와 추적 번호가 표시된 카메라 영상');
     await expect(image).toBeVisible();
     await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
-    await expect.poll(async () => (await (await page.request.get(`/api/cameras/${cameraId}/status`)).json()).max_people).toBeGreaterThan(0);
+    await expect.poll(async () => {
+      const state = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
+      return controls.values.person_detection_enabled === false
+        ? state.result?.detection_mode === 'face' && state.processed_frames > 0
+        : state.max_people > 0;
+    }).toBe(true);
     expect((await request.get(`/api/cameras/${cameraId}/preview`)).status()).toBe(401);
     const first = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
     mkdirSync('../data/screenshots', {recursive:true});

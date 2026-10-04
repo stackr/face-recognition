@@ -42,21 +42,28 @@ test('Live Search 영상·가운데 이벤트·오른쪽 분석 배치, 얼굴 �
       cameraIds.push((await camera.json()).camera_id);
     }
     const [firstCamera, secondCamera] = cameraIds;
-    expect((await page.request.put(`/api/cameras/${firstCamera}/video`, {
-      headers:{...headers, 'Content-Type':'video/mp4'}, data:readFileSync('../data/videos/face-smoke.mp4')
-    })).status()).toBe(200);
     await page.goto(`/#/live/${firstCamera}`);
     await expect(page.getByRole('heading', {name:'Live Search', exact:true})).toBeVisible();
-    await expect(page.getByLabel('분석할 카메라').locator('option:checked')).toHaveText(`${prefix}-A`);
+    await expect(page.locator('.uploaded-video-name')).toHaveCount(0);
+    await page.getByLabel('시험 MP4 업로드', {exact:true}).setInputFiles({
+      name:'시험 영상.mp4', mimeType:'video/mp4', buffer:readFileSync('../data/videos/face-smoke.mp4')
+    });
+    await expect(page.locator('.uploaded-video-name')).toHaveText('업로드한 파일: 시험 영상.mp4');
+    await expect(page.getByLabel('카메라', {exact:true}).locator('option:checked')).toHaveText(`${prefix}-A`);
     await expect(page.locator('.live-camera-list')).toHaveCount(0);
     await expect(page.getByText('다른 계정의 영상 접근 권한', {exact:true})).toHaveCount(0);
-    const cameraSelect = page.getByLabel('분석할 카메라');
+    const cameraSelect = page.getByLabel('카메라', {exact:true});
     const other = cameraSelect.locator("option").filter({hasText:`${prefix}-B`});
     await expect(other).toHaveCount(1);
     const panel = page.locator('app-event-panel');
     const eventColumns = () => panel.locator('.event-grid').evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);
     await expect(panel.getByRole('status')).toHaveText('연결됨', {timeout:15000});
     await panel.getByLabel('인물 이름', {exact:true}).fill(personName);
+    const filterBoxes = await Promise.all(['카메라 범위', '이벤트 상태', '인물 이름'].map(name => panel.getByLabel(name, {exact:true}).boundingBox()));
+    expect(filterBoxes[0]!.y).toBeCloseTo(filterBoxes[1]!.y, 0);
+    expect(filterBoxes[1]!.y).toBeCloseTo(filterBoxes[2]!.y, 0);
+    expect(filterBoxes[0]!.x + filterBoxes[0]!.width).toBeLessThan(filterBoxes[1]!.x);
+    expect(filterBoxes[1]!.x + filterBoxes[1]!.width).toBeLessThan(filterBoxes[2]!.x);
     const boxes = await Promise.all([page.locator('.live-main'), panel].map(locator => locator.boundingBox()));
     expect(boxes.every(box => box !== null)).toBe(true);
     expect(boxes[1]!.x + boxes[1]!.width).toBeLessThan(boxes[0]!.x);
@@ -151,15 +158,17 @@ test('Live Search 영상·가운데 이벤트·오른쪽 분석 배치, 얼굴 �
     await expect(page).toHaveURL(new RegExp(`#/live/${secondCamera}$`));
     await expect(cameraSelect.locator("option:checked")).toHaveText(`${prefix}-B`);
     await expect(previewCard.getByRole('heading')).toHaveText(`${prefix}-B`);
+    await expect(page.locator('.uploaded-video-name')).toHaveCount(0);
     await expect(card).toHaveCount(0);
     await panel.getByLabel('카메라 범위', {exact:true}).selectOption('all');
     await expect(card).toHaveCount(1);
     await page.goBack();
     await expect(page).toHaveURL(new RegExp(`#/live/${firstCamera}$`));
     await expect(cameraSelect.locator("option:checked")).toHaveText(`${prefix}-A`);
-    await expect(page.getByLabel('분석할 카메라').locator('option:checked')).toHaveText(`${prefix}-A`);
+    await expect(page.getByLabel('카메라', {exact:true}).locator('option:checked')).toHaveText(`${prefix}-A`);
     await page.reload();
     await expect(cameraSelect.locator("option:checked")).toHaveText(`${prefix}-A`);
+    await expect(page.locator('.uploaded-video-name')).toHaveText('업로드한 파일: 시험 영상.mp4');
     await panel.getByLabel('인물 이름', {exact:true}).fill(personName);
     await expect(card).toHaveCount(1);
     await page.setViewportSize({width:390, height:844});

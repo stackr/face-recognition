@@ -128,7 +128,7 @@
         }
         <div class="live-main">
         <section class="card analysis-controls">
-          <label for="live-camera" class="form-label">분석할 카메라</label>
+          <label for="live-camera" class="form-label">카메라</label>
           <select id="live-camera" class="form-select" [ngModel]="selectedCamera()?.camera_id ?? null" (ngModelChange)="selectLive($event)" [disabled]="busy()"><option [ngValue]="null" disabled>카메라를 선택하세요</option>@for (camera of viewableCameras(); track camera.camera_id) {<option [ngValue]="camera.camera_id">{{ camera.name }}</option>}</select>
           @if (selectedCamera(); as camera) {
             <div class="analysis-actions">
@@ -138,6 +138,7 @@
               <span class="analysis-state" [class.running]="analysis()?.state === 'running'">{{ analysisLabel() }}</span>@if (!camera.can_operate) {<small class="text-secondary">조회 전용 · 분석 조작 권한 없음</small>}
             </div>
             @if (user()?.role === 'admin') {<div class="video-upload"><label for="mp4-upload" class="form-label">시험 MP4 업로드</label><input id="mp4-upload" type="file" accept="video/mp4,.mp4" class="form-control" (change)="uploadVideo($event)" [disabled]="busy() || activeAnalysis()"><small class="text-secondary">200 MB 이하 · CCTV 주소를 유지한 채 시험 영상을 사용할 수 있습니다. 분석을 중지한 후 업로드하세요.</small></div>}
+            @if (camera.has_test_video) {<p class="uploaded-video-name">업로드한 파일: {{ camera.video_filename || '파일명 정보 없음' }}</p>}
           }
         </section>
         @if (selectedCamera()) {
@@ -165,7 +166,7 @@
             <small class="face-note">품질 기준과 자세 추정은 시험용 설정입니다. 특징 준비는 인물 확인을 의미하지 않습니다.</small>
           </section>
         }
-        @if (!selectedCamera()) {<section class="card live-empty"><h2>카메라를 선택하세요</h2><p>분석할 카메라에서 선택하면 영상과 추적별 얼굴 후보를 확인할 수 있습니다.</p></section>}
+        @if (!selectedCamera()) {<section class="card live-empty"><h2>카메라를 선택하세요</h2><p>카메라 선택 상자에서 선택하면 영상과 추적별 얼굴 후보를 확인할 수 있습니다.</p></section>}
         </div>
         <app-event-panel [requestHeaders]="headers()" [selectedCameraId]="selectedCamera()?.camera_id ?? null" [references]="persons()" (sessionExpired)="clearSession()" />
         </div>

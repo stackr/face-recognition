@@ -153,6 +153,7 @@ def stop(
 async def upload(
     camera_id: int,
     request: Request,
+    filename: str | None = Query(default=None, min_length=1, max_length=255),
     user: User = Depends(admin_user),
     db: Session = Depends(get_db),
 ):
@@ -203,6 +204,16 @@ async def upload(
                 json={"source": str(path), "source_type": "mp4"},
             )
             camera.video_path = path.name
+            camera.video_filename = (
+                "".join(
+                    char
+                    for char in filename.replace("\\", "/").rsplit("/", 1)[-1]
+                    if char.isprintable()
+                ).strip()
+                or None
+                if filename is not None
+                else None
+            )
             audit(db, user, camera_id, "camera.video_upload")
             committed = True
         finally:

@@ -14,7 +14,7 @@ interface Auth { user: User; csrf_token: string; }
 interface Camera {
   camera_id: number; name: string; description: string; rtsp_url: string;
   location: string; enabled: boolean; created_at: string; updated_at: string;
-  source_type: 'rtsp' | 'mp4'; has_test_video: boolean;
+  source_type: 'rtsp' | 'mp4'; has_test_video: boolean; video_filename: string | null;
   can_view: boolean; can_operate: boolean;
 }
 interface CameraForm { name: string; description: string; rtsp_url: string; location: string; enabled: boolean; source_type: 'rtsp' | 'mp4'; }
@@ -469,7 +469,7 @@ export class AppComponent implements OnDestroy {
       this.error.set('200 MB 이하의 MP4 파일을 선택해 주세요.'); input.value = ''; return;
     }
     this.busy.set(true); this.error.set('');
-    this.http.put<Camera>(`/api/cameras/${camera.camera_id}/video`, file, {headers:{...this.headers(), 'Content-Type':'video/mp4'}}).pipe(timeout(120000)).subscribe({
+    this.http.put<Camera>(`/api/cameras/${camera.camera_id}/video`, file, {params:{filename:file.name}, headers:{...this.headers(), 'Content-Type':'video/mp4'}}).pipe(timeout(120000)).subscribe({
       next: value => { this.selectedCamera.set(value); this.analysisSource = 'mp4'; this.busy.set(false); this.notice.set('시험 영상을 업로드했습니다. 분석 시작을 눌러 주세요.'); this.refresh(); input.value = ''; },
       error: err => { this.busy.set(false); this.handleError(err); input.value = ''; }
     });
