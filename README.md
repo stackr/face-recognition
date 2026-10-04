@@ -30,7 +30,7 @@ Python 직접 의존성은 `requirements.txt`, 전체 해결 버전은 `requirem
 
 ## 접속 및 초기 계정
 
-- 화면: http://127.0.0.1:4200
+- 화면: http://127.0.0.1:4200 또는 http://서버IP:4200
 - API health: http://127.0.0.1:8000/api/health
 - API 문서: http://127.0.0.1:8000/docs
 
@@ -392,3 +392,8 @@ Phase 8 이벤트 영상 클립을 서비스에 반영했다. DB head는 `0007_e
 Phase 10 비교점수 평가 도구는 얼굴 쌍·영상 구간·미등록 인물 지표를 구분하며 DB 기준을 자동 변경하지 않는다. [Phase 10 결과](docs/phase10-report.md)를 참고한다. 현재 자료는 공개 smoke만 있으므로 실제 정확도 보정과 제안값은 unavailable이다.
 
 Phase 11 선택 Person Re-ID는 `scripts/prepare_reid.py`로 가중치를 준비하고 `scripts/check_reid.py`로 실제 CUDA 경로를 검증한다. 기본 REID_ENABLED=false이며 [Phase 11 결과](docs/phase11-report.md)에 활성화·검증·복원 명령을 기록했다. 카메라 간 연관·이동경로는 Phase 12 범위다.
+
+
+### 4200포트 외부 접속
+
+프런트엔드 npm start는 0.0.0.0:4200에서 요청을 받는다. 외부 브라우저 주소 http://서버IP:4200를 .env의 ALLOWED_ORIGINS 배열에 추가한 뒤 backend·frontend 사용자 서비스를 재시작한다. 기존 localhost origin은 유지한다. UFW를 사용한다면 서버에서 sudo ufw allow 4200/tcp로 해당 포트를 허용한다. 라우터나 별도 네트워크 방화벽을 사용하는 경우 그 경로에서도 포트 접근이 허용되어야 한다.
