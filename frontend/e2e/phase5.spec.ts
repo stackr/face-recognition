@@ -37,7 +37,7 @@ function rtspFixture() {
   }};
 }
 
-test('RTSP 사람 검출 전용, 이미지 초기화, 자동 복구와 재시도 중 중지', async ({page}) => {
+test('RTSP person-only detection, image cleanup, recovery and stopping', async ({page}) => {
   test.setTimeout(120000);
   const fixture = rtspFixture();
   let cameraId: number | undefined;
@@ -47,25 +47,25 @@ test('RTSP 사람 검출 전용, 이미지 초기화, 자동 복구와 재시도
     expect(ready.status).toBe('ready');
     const credentials = readFileSync('../data/local-admin.txt', 'utf8');
     await page.goto('/');
-    await page.getByLabel('아이디', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
-    await page.getByLabel('비밀번호', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
-    await page.getByRole('button', {name:'로그인', exact:true}).click();
-    await expect(page.getByRole('heading', {name:'시스템 준비 상태'})).toBeVisible();
+    await page.getByLabel('Username', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
+    await page.getByLabel('Password', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
+    await page.getByRole('button', {name:'Log In', exact:true}).click();
+    await expect(page.getByRole('heading', {name:'System Readiness'})).toBeVisible();
     const auth = await (await page.request.get('/api/auth/me')).json();
     headers = {'X-CSRF-Token':auth.csrf_token};
     const name = `RTSP-E2E-${Date.now()}`;
     const created = await page.request.post('/api/cameras', {headers, data:{name, source_type:'rtsp', rtsp_url:ready.url}});
     expect(created.status()).toBe(201);
     cameraId = (await created.json()).camera_id;
-    await page.getByRole('button', {name:'새로고침', exact:true}).click();
-    await page.getByRole('button', {name:'카메라 관리 열기'}).click();
-    await page.getByRole('row').filter({hasText:name}).getByRole('button', {name:'영상 분석', exact:true}).click();
+    await page.getByRole('button', {name:'Refresh', exact:true}).click();
+    await page.getByRole('navigation').getByRole('button', {name:/Cameras/}).click();
+    await page.getByRole('row').filter({hasText:name}).getByRole('button', {name:'Analyze Video', exact:true}).click();
     await expect(page.locator('#live-person-detection')).toBeChecked();
     await expect(page.locator('#live-person-detection')).toBeDisabled();
     await expect(page.locator('#live-face-detection')).not.toBeChecked();
     await expect(page.locator('#live-face-detection')).toBeDisabled();
-    await page.getByRole('button', {name:'분석 시작', exact:true}).click();
-    await expect(page.locator('.analysis-state')).toHaveText('분석 중', {timeout:20000});
+    await page.getByRole('button', {name:'Start Analysis', exact:true}).click();
+    await expect(page.locator('.analysis-state')).toHaveText('Analyzing', {timeout:20000});
     const thumb = page.locator('.person-track-image').first();
     await expect.poll(() => thumb.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
     const original = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
@@ -73,23 +73,23 @@ test('RTSP 사람 검출 전용, 이미지 초기화, 자동 복구와 재시도
     expect(original.face_detection_enabled).toBe(false);
     expect(original.face_detection_frames).toBe(0);
     expect(original.face_counts.embeddings_created ?? 0).toBe(0);
-    await expect(page.getByRole('heading', {name:'얼굴 검출', exact:true})).toHaveCount(0);
+    await expect(page.getByRole('heading', {name:'Face Detection', exact:true})).toHaveCount(0);
     const track = original.result.person_tracks[0];
     const oldThumb = `/api/cameras/${cameraId}/people/${track.track_id}?stream_session_id=${original.stream_session_id}`;
     const preview = page.locator('.preview-screen img');
     await expect.poll(() => preview.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
     await fixture.command('pause');
-    await expect(page.locator('.analysis-state')).toHaveText('자동 재연결 중', {timeout:20000});
-    await expect(page.locator('.reconnect-notice')).toContainText('영상 연결이 끊겼습니다.');
+    await expect(page.locator('.analysis-state')).toHaveText('Reconnecting automatically', {timeout:20000});
+    await expect(page.locator('.reconnect-notice')).toContainText('Video connection lost.');
     await expect(page.locator('.face-card')).toHaveCount(0);
     await expect(page.locator('.person-card')).toHaveCount(0);
     await expect(preview).toHaveCount(0);
-    await expect(page.getByRole('button', {name:'분석 시작', exact:true})).toBeDisabled();
-    await expect(page.getByRole('button', {name:'분석 중지', exact:true})).toBeEnabled();
-    await expect(page.getByLabel('시험 MP4 업로드')).toBeDisabled();
+    await expect(page.getByRole('button', {name:'Start Analysis', exact:true})).toBeDisabled();
+    await expect(page.getByRole('button', {name:'Stop Analysis', exact:true})).toBeEnabled();
+    await expect(page.getByLabel('Test MP4 Upload')).toBeDisabled();
     expect((await page.request.get(oldThumb)).status()).toBe(404);
     await fixture.command('resume');
-    await expect(page.locator('.analysis-state')).toHaveText('분석 중', {timeout:25000});
+    await expect(page.locator('.analysis-state')).toHaveText('Analyzing', {timeout:25000});
     await expect(page.locator('.reconnect-notice')).toHaveCount(0);
     await expect.poll(() => thumb.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
     await expect.poll(() => preview.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
@@ -98,12 +98,12 @@ test('RTSP 사람 검출 전용, 이미지 초기화, 자동 복구와 재시도
     expect(recovered.reconnects).toBeGreaterThan(0);
     expect((await page.request.get(oldThumb)).status()).toBe(404);
     await fixture.command('down');
-    await expect(page.locator('.analysis-state')).toHaveText('자동 재연결 중', {timeout:15000});
-    await page.getByRole('button', {name:'분석 중지', exact:true}).click();
-    await expect(page.locator('.analysis-state')).toHaveText('중지됨');
+    await expect(page.locator('.analysis-state')).toHaveText('Reconnecting automatically', {timeout:15000});
+    await page.getByRole('button', {name:'Stop Analysis', exact:true}).click();
+    await expect(page.locator('.analysis-state')).toHaveText('Stopped');
     await fixture.command('up');
     await expect.poll(async () => (await (await page.request.get(`/api/cameras/${cameraId}/status`)).json()).state).toBe('stopped');
-    await expect(page.getByRole('button', {name:'분석 시작', exact:true})).toBeEnabled();
+    await expect(page.getByRole('button', {name:'Start Analysis', exact:true})).toBeEnabled();
     await expect(page.locator('.face-card')).toHaveCount(0);
     await expect(page.locator('.person-card')).toHaveCount(0);
   } finally {

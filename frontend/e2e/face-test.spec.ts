@@ -1,7 +1,7 @@
 import {expect, test} from '@playwright/test';
 import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 
-test('실제 CUDA 검출 설정·전체 프레임 분석·묶음·복구·빈 영상·분석 중 전체 삭제', async ({page, request}) => {
+test('CUDA face detection settings, frame analysis, grouping and deletion', async ({page, request}) => {
   test.setTimeout(180000);
   const accountFile = process.env['FACE_TEST_E2E_ACCOUNT'];
   if (!accountFile) throw new Error('Run scripts/check_face_test_browser.py to use an isolated account.');
@@ -10,24 +10,22 @@ test('실제 CUDA 검출 설정·전체 프레임 분석·묶음·복구·빈 �
   page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({width:1600, height:1000});
   await page.goto('/');
-  await page.getByLabel('아이디', {exact:true}).fill(account.username);
-  await page.getByLabel('비밀번호', {exact:true}).fill(account.password);
-  await page.getByRole('button', {name:'로그인', exact:true}).click();
-  await expect(page.getByRole('heading', {name:'시스템 준비 상태', exact:true})).toBeVisible();
+  await page.getByLabel('Username', {exact:true}).fill(account.username);
+  await page.getByLabel('Password', {exact:true}).fill(account.password);
+  await page.getByRole('button', {name:'Log In', exact:true}).click();
+  await expect(page.getByRole('heading', {name:'System Readiness', exact:true})).toBeVisible();
   const auth = await (await page.request.get('/api/auth/me')).json();
   const headers = {'X-CSRF-Token':auth.csrf_token};
-  const menu = page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button');
-  expect((await menu.allTextContents()).at(-1)).toContain('얼굴 검출 테스트');
-  await menu.filter({hasText:'얼굴 검출 테스트'}).click();
-  await expect(page.getByRole('heading', {name:'얼굴 검출 테스트', exact:true})).toBeVisible();
-  await expect(page.getByRole('button', {name:'영상 분석', exact:true})).toBeDisabled();
+  await page.goto('/#/face-test');
+  await expect(page.getByRole('heading', {name:'Face Detection Test', exact:true})).toBeVisible();
+  await expect(page.getByRole('button', {name:'Analyze Video', exact:true})).toBeDisabled();
   const initial = await (await page.request.get('/api/face-tests')).json();
   expect(initial.items).toEqual([]);
   expect(initial.can_start).toBe(true);
-  const threshold = page.getByLabel('검출 기준', {exact:true});
-  const minimum = page.getByLabel('최소 얼굴 크기 (px)', {exact:true});
-  const match = page.getByLabel('비교점수 기준', {exact:true});
-  const analyze = page.getByRole('button', {name:'영상 분석', exact:true});
+  const threshold = page.getByLabel('Detection Threshold', {exact:true});
+  const minimum = page.getByLabel('Minimum Face Size (px)', {exact:true});
+  const match = page.getByLabel('Similarity Threshold', {exact:true});
+  const analyze = page.getByRole('button', {name:'Analyze Video', exact:true});
   await expect(threshold).toHaveValue(String(initial.defaults.detection_threshold));
   await expect(minimum).toHaveValue(String(initial.defaults.min_face_size));
   await expect(match).toHaveValue(String(initial.defaults.match_threshold));
@@ -35,7 +33,7 @@ test('실제 CUDA 검출 설정·전체 프레임 분석·묶음·복구·빈 �
   expect(await minimum.evaluate(input => !!(input.compareDocumentPosition(document.querySelector('#face-test-video')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
   expect(await match.evaluate(input => !!(input.compareDocumentPosition(document.querySelector('#face-test-video')!) & Node.DOCUMENT_POSITION_FOLLOWING))).toBe(true);
   await expect(page.locator('.live-search-layout')).toHaveCount(0);
-  await page.getByLabel('분석할 영상 파일', {exact:true}).setInputFiles(account.videos.faces);
+  await page.getByLabel('Video File to Analyze', {exact:true}).setInputFiles(account.videos.faces);
   for (const invalid of ['', '0.09', '1']) {
     await threshold.fill(invalid);
     await expect(analyze).toBeDisabled();
@@ -51,9 +49,9 @@ test('실제 CUDA 검출 설정·전체 프레임 분석·묶음·복구·빈 �
     await expect(analyze).toBeDisabled();
   }
   await match.fill('0.8');
-  await expect(page.getByRole('button', {name:'영상 분석', exact:true})).toBeEnabled();
+  await expect(page.getByRole('button', {name:'Analyze Video', exact:true})).toBeEnabled();
   const created = page.waitForResponse(response => response.url().includes('/api/face-tests') && response.request().method() === 'POST');
-  await page.getByRole('button', {name:'영상 분석', exact:true}).click();
+  await page.getByRole('button', {name:'Analyze Video', exact:true}).click();
   expect((await created).status()).toBe(202);
   let job: {job_id:string; state:string; actual_device:string; processed_frames:number; total_frames:number; detections:number; detection_threshold:number; min_face_size:number; threshold:number; groups_before_merge:number; merged_group_count:number; groups:{group_id:number; occurrences:number; embedding_ready:boolean}[]};
   await expect.poll(async () => {
@@ -72,10 +70,10 @@ test('실제 CUDA 검출 설정·전체 프레임 분석·묶음·복구·빈 �
   expect(job!.detections).toBe(80);
   expect(job!.groups.every(group => group.embedding_ready && group.occurrences === 40)).toBe(true);
   await expect(page.locator('.face-test-card')).toHaveCount(2);
-  await expect(page.locator('.face-test-progress')).toContainText('분석 완료');
-  await expect(page.locator('.face-test-applied-settings')).toHaveText('적용한 검출 기준 0.50 · 최소 얼굴 크기 32 px');
-  await expect(page.locator('.face-test-applied-match')).toContainText('비교점수 기준 0.80');
-  await expect(page.locator('.face-test-merge-result')).toHaveText('묶음 재비교 완료 · 2개 → 2개 · 0개 병합');
+  await expect(page.locator('.face-test-progress')).toContainText('Analysis complete');
+  await expect(page.locator('.face-test-applied-settings')).toHaveText('Applied Detection Threshold 0.50 · Minimum Face Size 32 px');
+  await expect(page.locator('.face-test-applied-match')).toContainText('Similarity Threshold 0.80');
+  await expect(page.locator('.face-test-merge-result')).toHaveText('Group comparison complete · 2 items → 2 items · 0 groups merged');
   await match.fill('0.95');
   await expect(page.locator('.face-test-applied-match')).toContainText('0.80');
   await minimum.fill('512');
@@ -99,7 +97,7 @@ test('실제 CUDA 검출 설정·전체 프레임 분석·묶음·복구·빈 �
 
   // A stricter confidence cutoff excludes the lower-confidence face in this public fixture.
   await threshold.fill('0.8');
-  await page.getByLabel('분석할 영상 파일', {exact:true}).setInputFiles(account.videos.faces);
+  await page.getByLabel('Video File to Analyze', {exact:true}).setInputFiles(account.videos.faces);
   await analyze.click();
   await expect.poll(async () => {
     const latest = (await (await page.request.get('/api/face-tests')).json()).items[0];
@@ -116,14 +114,14 @@ test('실제 CUDA 검출 설정·전체 프레임 분석·묶음·복구·빈 �
 
   // The same real faces are excluded when their original-frame size is below the setting.
   await minimum.fill('512');
-  await page.getByLabel('분석할 영상 파일', {exact:true}).setInputFiles(account.videos.faces);
+  await page.getByLabel('Video File to Analyze', {exact:true}).setInputFiles(account.videos.faces);
   await analyze.click();
   await expect.poll(async () => {
     const latest = (await (await page.request.get('/api/face-tests')).json()).items[0];
     return latest.job_id !== job!.job_id && latest.state === 'completed' && latest.processed_frames === 40
       && latest.detections === 0 && latest.groups.length === 0 && latest.min_face_size === 512;
   }, {timeout:90000}).toBe(true);
-  await expect(page.getByText('이 영상에서 검출된 얼굴이 없습니다.', {exact:true})).toBeVisible();
+  await expect(page.getByText('No faces detected in this video.', {exact:true})).toBeVisible();
   await expect(page.locator('.face-test-applied-settings')).toContainText('512 px');
   await minimum.fill('32');
 
@@ -131,46 +129,46 @@ test('실제 CUDA 검출 설정·전체 프레임 분석·묶음·복구·빈 �
   await expect(threshold).toHaveValue('0.8');
   await expect(minimum).toHaveValue('512');
   await minimum.fill('32');
-  await expect(page.getByRole('button', {name:'영상 분석', exact:true})).toBeDisabled();
-  await page.getByLabel('분석할 영상 파일', {exact:true}).setInputFiles(account.videos.blank);
-  await page.getByRole('button', {name:'영상 분석', exact:true}).click();
+  await expect(page.getByRole('button', {name:'Analyze Video', exact:true})).toBeDisabled();
+  await page.getByLabel('Video File to Analyze', {exact:true}).setInputFiles(account.videos.blank);
+  await page.getByRole('button', {name:'Analyze Video', exact:true}).click();
   await expect.poll(async () => {
     const latest = (await (await page.request.get('/api/face-tests')).json()).items[0];
     return latest.filename === 'blank.mp4' && latest.state === 'completed' && latest.processed_frames === 20 && latest.groups.length === 0;
   }).toBe(true);
-  await expect(page.getByText('이 영상에서 검출된 얼굴이 없습니다.', {exact:true})).toBeVisible();
-  await expect(page.getByLabel('분석 결과 영상', {exact:true})).toBeVisible();
-  await page.getByLabel('분석 결과 영상', {exact:true}).selectOption(job!.job_id);
+  await expect(page.getByText('No faces detected in this video.', {exact:true})).toBeVisible();
+  await expect(page.getByLabel('Analyzed Video', {exact:true})).toBeVisible();
+  await page.getByLabel('Analyzed Video', {exact:true}).selectOption(job!.job_id);
   await expect(page.locator('.face-test-card')).toHaveCount(2);
 
   // Even at the lowest comparison cutoff, simultaneous people stay separate.
   await threshold.fill('0.5');
   await match.fill('-1');
-  await page.getByLabel('분석할 영상 파일', {exact:true}).setInputFiles(account.videos.faces);
+  await page.getByLabel('Video File to Analyze', {exact:true}).setInputFiles(account.videos.faces);
   await analyze.click();
   await expect.poll(async () => {
     const latest = (await (await page.request.get('/api/face-tests')).json()).items[0];
     return latest.state === 'completed' && latest.threshold === -1 && latest.processed_frames === 40
       && latest.groups.length === 2 && latest.groups_before_merge === 2 && latest.merged_group_count === 0;
   }, {timeout:90000}).toBe(true);
-  await expect(page.locator('.face-test-merge-result')).toHaveText('묶음 재비교 완료 · 2개 → 2개 · 0개 병합');
+  await expect(page.locator('.face-test-merge-result')).toHaveText('Group comparison complete · 2 items → 2 items · 0 groups merged');
   await page.reload();
   await expect(match).toHaveValue('-1');
   const after = await (await page.request.get('/api/face-tests')).json();
   expect(after.defaults.match_threshold).toBe(initial.defaults.match_threshold);
 
-  await page.getByLabel('분석할 영상 파일', {exact:true}).setInputFiles(account.videos.faces);
+  await page.getByLabel('Video File to Analyze', {exact:true}).setInputFiles(account.videos.faces);
   const again = page.waitForResponse(response => response.url().includes('/api/face-tests') && response.request().method() === 'POST');
-  await page.getByRole('button', {name:'영상 분석', exact:true}).click();
+  await page.getByRole('button', {name:'Analyze Video', exact:true}).click();
   expect((await again).status()).toBe(202);
   page.once('dialog', dialog => dialog.accept());
-  await page.getByRole('button', {name:'목록 전체 삭제', exact:true}).click();
-  await expect(page.getByText('모든 분석 목록과 추출 사진을 삭제했습니다.', {exact:true})).toBeVisible();
+  await page.getByRole('button', {name:'Delete All Results', exact:true}).click();
+  await expect(page.getByText('All analysis results and extracted images deleted.', {exact:true})).toBeVisible();
   await expect(page.locator('.face-test-card')).toHaveCount(0);
   expect((await (await page.request.get('/api/face-tests')).json()).items).toEqual([]);
   expect((await page.request.get(imageUrl)).status()).toBe(404);
   await page.reload();
-  await expect(page.getByText('영상을 선택하고 [영상 분석] 버튼을 눌러 주세요.', {exact:true})).toBeVisible();
+  await expect(page.getByText('Select a video and click Analyze Video.', {exact:true})).toBeVisible();
   expect(errors).toEqual([]);
   mkdirSync('../data/reports', {recursive:true});
   writeFileSync('../data/reports/face-test-browser.json', JSON.stringify({status:'passed', actual_device:job!.actual_device,

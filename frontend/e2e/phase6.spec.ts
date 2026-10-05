@@ -9,7 +9,7 @@ interface Candidate {
   status: string;
 }
 
-test('검색 이벤트 화면, 확인·거부, WebSocket 중단 후 HTTP 복구와 모바일 표시', async ({page, request}) => {
+test('Search events, review, WebSocket recovery and mobile display', async ({page, request}) => {
   test.setTimeout(90000);
   const credentials = readFileSync('../data/local-admin.txt', 'utf8');
   let paused = false;
@@ -40,10 +40,10 @@ test('검색 이벤트 화면, 확인·거부, WebSocket 중단 후 HTTP 복구�
   });
 
   await page.goto('/');
-  await page.getByLabel('아이디', {exact: true}).fill(credentials.match(/^username: (.+)$/m)![1]);
-  await page.getByLabel('비밀번호', {exact: true}).fill(credentials.match(/^password: (.+)$/m)![1]);
-  await page.getByRole('button', {name: '로그인', exact: true}).click();
-  await expect(page.getByRole('heading', {name: '시스템 준비 상태'})).toBeVisible();
+  await page.getByLabel('Username', {exact: true}).fill(credentials.match(/^username: (.+)$/m)![1]);
+  await page.getByLabel('Password', {exact: true}).fill(credentials.match(/^password: (.+)$/m)![1]);
+  await page.getByRole('button', {name: 'Log In', exact: true}).click();
+  await expect(page.getByRole('heading', {name: 'System Readiness'})).toBeVisible();
   const auth = await (await page.request.get('/api/auth/me')).json();
   headers = {'X-CSRF-Token': auth.csrf_token};
   const suffix = `${Date.now()}`;
@@ -71,14 +71,14 @@ test('검색 이벤트 화면, 확인·거부, WebSocket 중단 후 HTTP 복구�
     });
     expect(video.status()).toBe(200);
 
-    await page.getByRole('button', {name: '새로고침', exact: true}).click();
-    await page.getByRole('button', {name: '카메라 관리 열기'}).click();
+    await page.getByRole('button', {name: 'Refresh', exact: true}).click();
+    await page.getByRole('navigation').getByRole('button', {name:/Cameras/}).click();
     const row = page.getByRole('row').filter({hasText: cameraName});
     await expect(row).toBeVisible();
-    await row.getByRole('button', {name: '영상 분석', exact: true}).click();
+    await row.getByRole('button', {name: 'Analyze Video', exact: true}).click();
     const panel = page.locator('app-event-panel');
-    await expect(panel.getByRole('heading', {name: '검색 이벤트', exact: true})).toBeVisible();
-    await expect(panel.getByRole('status')).toHaveText('연결됨', {timeout: 15000});
+    await expect(panel.getByRole('heading', {name: 'Search Events', exact: true})).toBeVisible();
+    await expect(panel.getByRole('status')).toHaveText('Connected', {timeout: 15000});
     const started = await page.request.post(`/api/cameras/${cameraId}/start`, {
       headers, data: {source_type: 'mp4', loop: false}
     });
@@ -91,24 +91,24 @@ test('검색 이벤트 화면, 확인·거부, WebSocket 중단 후 HTTP 복구�
     await expect(card).toHaveCount(1);
     await expect(card).toContainText(personName);
     await expect(card).toContainText(cameraName);
-    await expect(card.locator('.event-status')).toHaveText('확인 전 후보');
+    await expect(card.locator('.event-status')).toHaveText('Unconfirmed candidate');
     await expect.poll(() => card.locator('.event-detected-image').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(112);
-    await card.getByRole('button', {name: '검출 프레임', exact:true}).click();
-    const frameDialog = page.getByRole('dialog', {name:'검출 프레임', exact:true});
+    await card.getByRole('button', {name: 'Detected Frame', exact:true}).click();
+    const frameDialog = page.getByRole('dialog', {name:'Detected Frame', exact:true});
     await expect(frameDialog).toBeVisible();
     await expect(frameDialog.locator('img')).toHaveAttribute('src', `/api/events/${eventId}/frame`);
     await expect.poll(() => frameDialog.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
-    await frameDialog.getByRole('button', {name:'검출 프레임 닫기'}).click();
+    await frameDialog.getByRole('button', {name:'Close Detected Frame'}).click();
     await expect(frameDialog).toHaveCount(0);
     expect((await request.get(facePath)).status()).toBe(401);
     expect((await page.request.post(`/api/cameras/${cameraId}/stop`, {headers})).status()).toBe(200);
 
-    await card.getByRole('button', {name: '거부', exact: true}).click();
-    await expect(card.locator('.event-status')).toHaveText('운영자 거부');
-    await expect(card.getByRole('button', {name: '거부', exact: true})).toBeDisabled();
-    await card.getByRole('button', {name: '확인', exact: true}).click();
-    await expect(card.locator('.event-status')).toHaveText('운영자 확인');
-    await expect(card.getByRole('button', {name: '확인', exact: true})).toBeDisabled();
+    await card.getByRole('button', {name: 'Reject', exact: true}).click();
+    await expect(card.locator('.event-status')).toHaveText('Rejected by operator');
+    await expect(card.getByRole('button', {name: 'Reject', exact: true})).toBeDisabled();
+    await card.getByRole('button', {name: 'Confirm', exact: true}).click();
+    await expect(card.locator('.event-status')).toHaveText('Confirmed by operator');
+    await expect(card.getByRole('button', {name: 'Confirm', exact: true})).toBeDisabled();
 
     // Save a review while WS is disconnected, then require cursor recovery to contain it.
     paused = true;
@@ -117,11 +117,11 @@ test('검색 이벤트 화면, 확인·거부, WebSocket 중단 후 HTTP 복구�
     // Each route closes only its own side; explicitly deliver the close to the browser.
     await browserSocket!.close({code: 1013});
     await serverSocket!.close({code: 1013});
-    await expect(panel.getByRole('status')).toHaveText('재연결 대기');
+    await expect(panel.getByRole('status')).toHaveText('Waiting to reconnect');
     const rejected = await page.request.post(`/api/events/${eventId}/reject`, {headers});
     expect(rejected.status()).toBe(200);
     const rejectedChange = (await rejected.json()).change_id;
-    await expect(card.locator('.event-status')).toHaveText('운영자 확인');
+    await expect(card.locator('.event-status')).toHaveText('Confirmed by operator');
     const recovery = page.waitForResponse(async response => {
       const url = new URL(response.url());
       if (url.pathname !== '/api/events' || !url.searchParams.has('after_change_id')
@@ -132,17 +132,17 @@ test('검색 이벤트 화면, 확인·거부, WebSocket 중단 후 HTTP 복구�
     }, {timeout: 20000});
     paused = false;
     await recovery;
-    await expect(panel.getByRole('status')).toHaveText('연결됨');
-    await expect(card.locator('.event-status')).toHaveText('운영자 거부');
+    await expect(panel.getByRole('status')).toHaveText('Connected');
+    await expect(card.locator('.event-status')).toHaveText('Rejected by operator');
     await expect(card).toHaveCount(1);
 
     await page.reload();
-    await expect(panel.getByRole('status')).toHaveText('연결됨', {timeout: 15000});
-    await expect(card.locator('.event-status')).toHaveText('운영자 거부');
+    await expect(panel.getByRole('status')).toHaveText('Connected', {timeout: 15000});
+    await expect(card.locator('.event-status')).toHaveText('Rejected by operator');
     await page.setViewportSize({width: 390, height: 844});
     await card.scrollIntoViewIfNeeded();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    await expect(card.getByRole('button', {name: '확인', exact: true})).toBeVisible();
+    await expect(card.getByRole('button', {name: 'Confirm', exact: true})).toBeVisible();
     mkdirSync('../data/screenshots', {recursive: true});
     await card.screenshot({path: '../data/screenshots/phase6-event-mobile.png'});
 
@@ -150,8 +150,8 @@ test('검색 이벤트 화면, 확인·거부, WebSocket 중단 후 HTTP 복구�
     cameraId = undefined;
     expect([202, 204]).toContain((await page.request.delete(`/api/persons/${personId}`, {headers})).status());
     personId = undefined;
-    await page.getByRole('button', {name: '로그아웃', exact: true}).click();
-    await expect(page.getByRole('heading', {name: '로그인', exact: true})).toBeVisible();
+    await page.getByRole('button', {name: 'Log Out', exact: true}).click();
+    await expect(page.getByRole('heading', {name: 'Log In', exact: true})).toBeVisible();
     await expect(panel).toHaveCount(0);
   } finally {
     paused = false;

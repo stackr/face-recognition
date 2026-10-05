@@ -8,40 +8,40 @@ interface CropArea {x: number; y: number; width: number; height: number;}
   selector: 'app-face-cropper', standalone: true, imports: [CommonModule, FormsModule],
   template: `
     <div class="face-cropper">
-      <h3>얼굴 영역 크롭</h3>
-      <p>사진에서 얼굴 전체와 약간의 여백을 포함하도록 영역을 선택하세요. 영역 안을 드래그하면 이동하고 오른쪽 아래 손잡이로 크기를 조절할 수 있습니다.</p>
-      @if (loading()) {<p role="status">사진을 불러오고 있습니다.</p>}
+      <h3>Crop Face Region</h3>
+      <p>Select an area containing the entire face with a small margin. Drag inside the area to move it, or use the bottom-right handle to resize it.</p>
+      @if (loading()) {<p role="status">Loading image.</p>}
       @if (error()) {<div class="alert alert-danger" role="alert">{{ error() }}</div>}
       @if (image()) {
         <div class="crop-layout">
           <div class="crop-stage" [style.width.px]="stageWidth()"
             (pointerdown)="beginCrop($event)" (pointermove)="moveCrop($event)"
             (pointerup)="endCrop($event)" (pointercancel)="endCrop($event)">
-            <img [src]="sourceUrl()" alt="얼굴 영역을 선택할 원본 사진" draggable="false">
+            <img [src]="sourceUrl()" alt="Source image for selecting a face region" draggable="false">
             <div class="crop-selection" [style.left.%]="area.x / width * 100" [style.top.%]="area.y / height * 100"
               [style.width.%]="area.width / width * 100" [style.height.%]="area.height / height * 100">
-              <span class="crop-selection-label">얼굴 영역</span>
-              <button type="button" class="crop-handle" aria-label="크롭 영역 크기 조절" [disabled]="locked()"></button>
+              <span class="crop-selection-label">Face Region</span>
+              <button type="button" class="crop-handle" aria-label="Resize crop region" [disabled]="locked()"></button>
             </div>
           </div>
           <div class="crop-controls">
-            <h4>크롭 미리보기</h4><img class="crop-preview" [src]="preview()" alt="저장할 크롭 사진 미리보기">
+            <h4>Crop Preview</h4><img class="crop-preview" [src]="preview()" alt="Preview of the cropped image to save">
             <div class="crop-coordinates">
-              <label>시작 X<input aria-label="크롭 시작 X" type="number" class="form-control" [ngModel]="area.x" (ngModelChange)="adjust('x', $event)" [min]="0" [max]="width - area.width" [disabled]="locked()"></label>
-              <label>시작 Y<input aria-label="크롭 시작 Y" type="number" class="form-control" [ngModel]="area.y" (ngModelChange)="adjust('y', $event)" [min]="0" [max]="height - area.height" [disabled]="locked()"></label>
-              <label>가로<input aria-label="크롭 가로" type="number" class="form-control" [ngModel]="area.width" (ngModelChange)="adjust('width', $event)" [min]="80" [max]="width - area.x" [disabled]="locked()"></label>
-              <label>세로<input aria-label="크롭 세로" type="number" class="form-control" [ngModel]="area.height" (ngModelChange)="adjust('height', $event)" [min]="80" [max]="height - area.y" [disabled]="locked()"></label>
+              <label>Start X<input aria-label="Crop Origin X" type="number" class="form-control" [ngModel]="area.x" (ngModelChange)="adjust('x', $event)" [min]="0" [max]="width - area.width" [disabled]="locked()"></label>
+              <label>Start Y<input aria-label="Crop Origin Y" type="number" class="form-control" [ngModel]="area.y" (ngModelChange)="adjust('y', $event)" [min]="0" [max]="height - area.height" [disabled]="locked()"></label>
+              <label>Width<input aria-label="Crop Width" type="number" class="form-control" [ngModel]="area.width" (ngModelChange)="adjust('width', $event)" [min]="80" [max]="width - area.x" [disabled]="locked()"></label>
+              <label>Height<input aria-label="Crop Height" type="number" class="form-control" [ngModel]="area.height" (ngModelChange)="adjust('height', $event)" [min]="80" [max]="height - area.y" [disabled]="locked()"></label>
             </div>
-            <small>{{ area.width }} × {{ area.height }} px · 사진 {{ width }} × {{ height }} px</small>
-            <button type="button" class="btn btn-outline-secondary" (click)="resetCrop()" [disabled]="locked()">전체 사진 선택</button>
+            <small>{{ area.width }} × {{ area.height }} px · Image {{ width }} × {{ height }} px</small>
+            <button type="button" class="btn btn-outline-secondary" (click)="resetCrop()" [disabled]="locked()">Select Full Image</button>
           </div>
         </div>
       }
       <div class="crop-actions">
-        <button type="button" class="btn btn-primary" (click)="save()" [disabled]="locked() || !image()">{{ locked() ? '처리 중…' : '크롭한 얼굴 저장' }}</button>
-        <button type="button" class="btn btn-outline-secondary" (click)="skipCrop.emit()" [disabled]="locked()">이 사진 취소</button>
+        <button type="button" class="btn btn-primary" (click)="save()" [disabled]="locked() || !image()">{{ locked() ? 'Processing…' : 'Save Cropped Face' }}</button>
+        <button type="button" class="btn btn-outline-secondary" (click)="skipCrop.emit()" [disabled]="locked()">Cancel This Image</button>
       </div>
-      <small>선택한 영역을 저장하면 얼굴 탐지·품질 검사를 거쳐 정렬된 얼굴 사진이 등록됩니다.</small>
+      <small>Saving the selected area registers an aligned face image after detection and quality checks.</small>
     </div>
   `
 })
@@ -75,7 +75,7 @@ export class FaceCropperComponent implements OnChanges, OnDestroy {
     const version = ++this.version;
     this.releaseImage(); this.loading.set(true); this.exporting.set(false); this.error.set('');
     if (!['image/jpeg', 'image/png'].includes(this.file.type) || this.file.size > 10 * 1024 ** 2) {
-      this.loading.set(false); this.error.set('10 MB 이하 JPEG 또는 PNG 사진을 선택해 주세요.'); return;
+      this.loading.set(false); this.error.set('Choose a JPEG or PNG image up to 10 MB.'); return;
     }
     const image = new Image(), url = URL.createObjectURL(this.file);
     this.sourceUrl.set(url);
@@ -84,13 +84,13 @@ export class FaceCropperComponent implements OnChanges, OnDestroy {
       this.loading.set(false);
       this.width = image.naturalWidth; this.height = image.naturalHeight;
       if (this.width < 80 || this.height < 80 || this.width > 4096 || this.height > 4096 || this.width * this.height > 12_000_000) {
-        this.releaseImage(); this.error.set('사진은 가로·세로 80~4096 px, 1200만 픽셀 이하로 선택해 주세요.'); return;
+        this.releaseImage(); this.error.set('Choose an image with sides from 80 to 4096 px and no more than 12 million pixels.'); return;
       }
       this.image.set(image); this.area = {x: 0, y: 0, width: this.width, height: this.height}; this.updatePreview();
     };
     image.onerror = () => {
       if (version !== this.version) return;
-      this.loading.set(false); this.releaseImage(); this.error.set('읽을 수 없는 이미지입니다. 다른 사진을 선택해 주세요.');
+      this.loading.set(false); this.releaseImage(); this.error.set('Could not read the image. Choose another photo.');
     };
     image.src = url;
   }
@@ -156,7 +156,7 @@ export class FaceCropperComponent implements OnChanges, OnDestroy {
     this.canvas(true).toBlob(blob => {
       if (version !== this.version) return;
       this.exporting.set(false);
-      if (!blob || blob.size > 10 * 1024 ** 2) {this.error.set('크롭 사진을 만들지 못했거나 10 MB를 초과했습니다. 영역을 줄여 주세요.'); return;}
+      if (!blob || blob.size > 10 * 1024 ** 2) {this.error.set('Could not create the crop, or it exceeded 10 MB. Reduce the selected area.'); return;}
       this.saveCrop.emit(blob);
     }, 'image/jpeg', 0.95);
   }

@@ -61,12 +61,12 @@ export class FunctionSettingsComponent implements OnChanges, OnDestroy {
         next: result => {
           this.result.set(result); this.values = {...result.values}; this.revision = result.revision; this.dirty = false;
           this.saving.set(false); this.savingChange.emit(false);
-          this.notice.set(result.applied ? '설정을 저장하고 실행 중인 분석에 반영했습니다.' : '설정을 저장했습니다. 분석 서비스에 반영될 때까지 상태를 확인합니다.');
+          this.notice.set(result.applied ? 'Settings saved and applied to active analysis.' : 'Settings saved. Checking their status until the analysis service applies them.');
         }, error: error => {this.saving.set(false); this.savingChange.emit(false); this.failed(error);}
       });
   }
   private failed(error: HttpErrorResponse) {
     if (error.status === 401) this.sessionExpired.emit();
-    this.error.set(error.status === 409 ? '다른 화면에서 설정이 변경되었습니다. 저장값을 다시 불러온 후 수정해 주세요.' : error.status === 403 ? '설정을 변경할 권한이 없습니다.' : '설정을 확인하지 못했습니다. 서버 연결과 입력값을 확인해 주세요.');
+    this.error.set(error.status === 409 ? 'Settings were changed elsewhere. Reload the saved values before editing.' : error.status === 403 ? 'You do not have permission to change settings.' : 'Could not verify settings. Check the server connection and input values.');
   }
 }

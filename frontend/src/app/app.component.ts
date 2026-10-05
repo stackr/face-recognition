@@ -59,7 +59,7 @@ export class AppComponent implements OnDestroy {
   user = signal<User | null>(null);
   loading = signal(true);
   busy = signal(false);
-  backend = signal('확인 중');
+  backend = signal('Checking');
   view = signal<'dashboard' | 'cameras' | 'persons' | 'person-editor' | 'live' | 'logs' | 'settings' | 'face-test'>('dashboard');
   controlsRefresh = signal(0);
   status = signal<SystemStatus | null>(null);
@@ -138,7 +138,7 @@ export class AppComponent implements OnDestroy {
   constructor() {
     window.addEventListener('hashchange', this.routeChanged);
     this.http.get<{status: string}>('/api/health').pipe(timeout(6000)).subscribe({
-      next: () => this.backend.set('연결됨'), error: () => this.backend.set('연결 실패')
+      next: () => this.backend.set('Connected'), error: () => this.backend.set('Connection failed')
     });
     this.http.get<Auth>('/api/auth/me').pipe(timeout(6000)).subscribe({
       next: auth => { this.acceptAuth(auth); this.loading.set(false); },
@@ -171,7 +171,7 @@ export class AppComponent implements OnDestroy {
       this.view.set('person-editor');
       if (!detail) {
         if (this.user()?.role !== 'admin') {
-          this.personLoadFailed.set(true); this.error.set('인물을 등록할 권한이 없습니다.');
+          this.personLoadFailed.set(true); this.error.set('You do not have permission to register people.');
         }
         return;
       }
@@ -188,7 +188,7 @@ export class AppComponent implements OnDestroy {
         error: err => {
           if (version !== this.personPageVersion || !this.user()) return;
           this.personLoading.set(false); this.personLoadFailed.set(true);
-          if (err.status === 404) this.error.set('인물을 찾을 수 없습니다. 목록에서 다시 선택해 주세요.');
+          if (err.status === 404) this.error.set('Person not found. Select another person from the list.');
           else this.handleError(err);
         }
       });
@@ -209,8 +209,8 @@ export class AppComponent implements OnDestroy {
 
   pageTitle() {
     if (this.view() === 'person-editor') return this.user()?.role === 'admin'
-      ? (this.personEditingId === null ? '인물 추가' : '인물 수정') : '인물 정보';
-    return {dashboard:'시스템 준비 상태', cameras:'카메라 관리', persons:'인물 관리', live:'Live Search', logs:'로그', settings:'기능 설정', 'face-test':'얼굴 검출 테스트'}[this.view() as 'dashboard' | 'cameras' | 'persons' | 'live' | 'logs' | 'settings' | 'face-test'];
+      ? (this.personEditingId === null ? 'Add Person' : 'Edit Person') : 'Person Details';
+    return {dashboard:'System Readiness', cameras:'Cameras', persons:'People', live:'Live Search', logs:'Logs', settings:'Feature Settings', 'face-test':'Face Detection Test'}[this.view() as 'dashboard' | 'cameras' | 'persons' | 'live' | 'logs' | 'settings' | 'face-test'];
   }
 
   login() {
@@ -220,22 +220,22 @@ export class AppComponent implements OnDestroy {
       .pipe(timeout(10000)).subscribe({
         next: auth => { this.password = ''; this.busy.set(false); this.acceptAuth(auth); },
         error: err => { this.password = ''; this.busy.set(false); this.error.set(
-          err.status === 429 ? '로그인 시도가 많습니다. 잠시 후 다시 시도해 주세요.' : '계정 정보 또는 서버 연결을 확인해 주세요.'); }
+          err.status === 429 ? 'Too many login attempts. Please try again shortly.' : 'Check your credentials or the server connection.'); }
       });
   }
 
   logout() {
     if (this.busy()) return;
     this.http.post('/api/auth/logout', {}, {headers: this.headers()}).subscribe({
-      next: () => this.clearSession(), error: () => this.error.set('로그아웃하지 못했습니다. 다시 시도해 주세요.')
+      next: () => this.clearSession(), error: () => this.error.set('Could not log out. Please try again.')
     });
   }
 
   clearSession() { this.dashboardStatuses.set({}); this.dashboardPendingSession = null; this.detectionChoices.clear(); this.analysisPersonEnabled = this.analysisFaceEnabled = true; this.sessionVersion++; this.liveVersion++; this.statusPending = false; this.camerasLoaded = false; this.resetPersonEditor(); this.user.set(null); this.csrf = ''; this.cameras.set([]); this.persons.set([]); this.status.set(null); this.selectedCamera.set(null); this.analysis.set(null); this.error.set(''); this.notice.set(''); }
 
   handleError(err: HttpErrorResponse) {
-    if (err.status === 401) { this.clearSession(); this.error.set('세션이 만료되었습니다. 다시 로그인해 주세요.'); }
-    else this.error.set(err.status === 403 ? '이 작업을 수행할 권한이 없습니다.' : '요청을 처리하지 못했습니다. 서버 연결과 입력값을 확인해 주세요.');
+    if (err.status === 401) { this.clearSession(); this.error.set('Your session expired. Please log in again.'); }
+    else this.error.set(err.status === 403 ? 'You do not have permission to perform this action.' : 'Could not process the request. Check the server connection and input values.');
   }
 
   refresh() {
@@ -327,7 +327,7 @@ export class AppComponent implements OnDestroy {
   }
   savePerson() {
     if (this.busy() || this.personLoading() || this.personLoadFailed() || this.user()?.role !== 'admin') return;
-    if (!this.personForm.name.trim()) { this.error.set('인물 이름을 입력해 주세요.'); return; }
+    if (!this.personForm.name.trim()) { this.error.set('Enter a person name.'); return; }
     this.busy.set(true); this.error.set('');
     const request = this.personEditingId === null
       ? this.http.post<Person>('/api/persons', this.personForm, {headers: this.headers()})
@@ -335,23 +335,23 @@ export class AppComponent implements OnDestroy {
     request.pipe(timeout(30000)).subscribe({next: person => {
       this.busy.set(false); this.acceptPerson(person);
       this.searchResult.set(null); this.refreshPersons();
-      this.notice.set(person.sync_status === 'pending' ? '정보를 저장했습니다. 검색 반영을 재시도 중입니다.' : '인물 정보를 저장했습니다. 얼굴 사진을 추가하세요.');
+      this.notice.set(person.sync_status === 'pending' ? 'Details saved. Retrying search synchronization.' : 'Person details saved. Add face photos.');
     }, error: err => { this.busy.set(false); this.handleError(err); }});
   }
   deletePerson(person: Person) {
-    if (this.busy() || !window.confirm(`“${person.name}” 인물과 등록 얼굴을 삭제할까요?`)) return;
+    if (this.busy() || !window.confirm(`“${person.name}” Delete this person and all registered faces?`)) return;
     this.busy.set(true);
     this.http.delete(`/api/persons/${person.id}`, {headers: this.headers(), observe: 'response'}).subscribe({next: response => {
       this.busy.set(false); this.navigate('persons'); this.refreshPersons();
-      this.notice.set(response.status === 202 ? '검색에서 제외했습니다. 저장소 삭제를 재시도 중입니다.' : '인물과 등록 얼굴을 삭제했습니다.');
+      this.notice.set(response.status === 202 ? 'Excluded from search. Retrying storage deletion.' : 'Person and registered faces deleted.');
     }, error: err => {this.busy.set(false); this.handleError(err);}});
   }
   referenceUrl(person: Person, face: ReferenceFace) {return `/api/persons/${person.id}/faces/${face.id}/image`;}
   referenceError(err: HttpErrorResponse) {
-    const labels: Record<string,string> = {no_face:'얼굴을 찾지 못했습니다. 얼굴이 선명한 사진을 선택해 주세요.', multiple_faces:'여러 얼굴이 보입니다. 한 사람만 있는 사진을 선택해 주세요.', quality_rejected:'얼굴 품질 기준을 통과하지 못했습니다. 크고 선명한 정면 사진을 선택해 주세요.', invalid_image:'읽을 수 없는 이미지입니다. JPEG 또는 PNG 파일을 선택해 주세요.', image_dimensions_exceeded:'사진은 가로·세로 4096 px 이하, 1200만 픽셀 이하로 선택해 주세요.'};
+    const labels: Record<string,string> = {no_face:'No face found. Choose a photo with a clearly visible face.', multiple_faces:'Multiple faces found. Choose a photo containing only one person.', quality_rejected:'The face did not pass quality checks. Choose a large, clear, front-facing photo.', invalid_image:'Could not read the image. Choose a JPEG or PNG file.', image_dimensions_exceeded:'Choose an image with sides up to 4096 px and no more than 12 million pixels.'};
     if (labels[err.error?.detail?.code]) this.error.set(labels[err.error.detail.code]);
-    else if (err.status === 413) this.error.set('사진은 10 MB 이하로 선택해 주세요.');
-    else if (err.status === 429) this.error.set('다른 사진을 처리 중입니다. 잠시 후 다시 시도해 주세요.');
+    else if (err.status === 413) this.error.set('Images must be 10 MB or less.');
+    else if (err.status === 429) this.error.set('Another image is being processed. Please try again shortly.');
     else this.handleError(err);
   }
   uploadReferences(event: Event) {
@@ -361,9 +361,9 @@ export class AppComponent implements OnDestroy {
     if (!files.length || this.busy() || this.user()?.role !== 'admin') return;
     this.error.set(''); this.notice.set('');
     if (files.some(file => !['image/jpeg','image/png'].includes(file.type) || file.size > 10 * 1024 ** 2)) {
-      this.error.set('10 MB 이하 JPEG 또는 PNG 사진을 선택해 주세요.'); return;
+      this.error.set('Choose a JPEG or PNG image up to 10 MB.'); return;
     }
-    if (files.length > 20) {this.error.set('한 번에 최대 20장까지 선택해 주세요.'); return;}
+    if (files.length > 20) {this.error.set('Select no more than 20 photos at a time.'); return;}
     this.cropFileCount = files.length; this.cropFiles.set(files);
   }
   skipReference() {
@@ -372,8 +372,8 @@ export class AppComponent implements OnDestroy {
   }
   async saveCroppedReference(photo: Blob) {
     if (this.busy() || !this.cropFiles().length || this.user()?.role !== 'admin') return;
-    if (this.personEditingId !== null && !this.selectedPerson()) {this.error.set('인물 정보를 다시 불러온 다음 사진을 등록해 주세요.'); return;}
-    if (!this.personForm.name.trim()) {this.error.set('인물 이름을 입력한 다음 얼굴 사진을 저장해 주세요.'); return;}
+    if (this.personEditingId !== null && !this.selectedPerson()) {this.error.set('Reload person details before uploading photos.'); return;}
+    if (!this.personForm.name.trim()) {this.error.set('Enter the person name before saving face images.'); return;}
     this.busy.set(true); this.error.set(''); this.notice.set('');
     let created = false;
     try {
@@ -386,17 +386,17 @@ export class AppComponent implements OnDestroy {
         {headers: {...this.headers(), 'Content-Type': 'image/jpeg'}}).pipe(timeout(45000)));
       this.selectedPerson.set({...person, faces: [...person.faces, face]});
       this.cropFiles.update(files => files.slice(1)); this.searchResult.set(null); this.refreshPersons();
-      this.notice.set(this.cropFiles().length ? '크롭한 얼굴 사진을 저장했습니다. 다음 사진의 영역을 선택해 주세요.' : '크롭한 얼굴 사진을 저장했습니다.');
+      this.notice.set(this.cropFiles().length ? 'Cropped face saved. Select the region for the next image.' : 'Cropped face saved.');
     } catch (err) {
       this.referenceError(err as HttpErrorResponse);
-      if (created && this.user()) this.error.update(message => message + ' 인물 정보는 저장되었습니다. 얼굴 영역을 조정해 다시 저장해 주세요.');
+      if (created && this.user()) this.error.update(message => message + ' Person details saved. Adjust the face region and try saving again.');
     } finally {this.busy.set(false);}
   }
   deleteReference(person: Person, face: ReferenceFace) {
-    if (this.busy() || !window.confirm('이 등록 얼굴을 삭제할까요?')) return;
+    if (this.busy() || !window.confirm('Delete this registered face?')) return;
     this.busy.set(true); this.error.set('');
     this.http.delete(`/api/persons/${person.id}/faces/${face.id}`, {headers:this.headers(), observe:'response'}).subscribe({next: response => {
-      this.busy.set(false); this.refreshPersons(); this.searchResult.set(null); this.notice.set(response.status === 202 ? '검색에서 제외했습니다. 삭제를 재시도 중입니다.' : '등록 얼굴을 삭제했습니다.');
+      this.busy.set(false); this.refreshPersons(); this.searchResult.set(null); this.notice.set(response.status === 202 ? 'Excluded from search. Retrying deletion.' : 'Registered face deleted.');
     }, error: err => { this.busy.set(false); this.handleError(err); }});
   }
   searchReference(event: Event) {
@@ -412,28 +412,28 @@ export class AppComponent implements OnDestroy {
     const person = this.selectedPerson(); if (!person || !this.personPermissionUsername.trim() || this.busy()) return;
     this.busy.set(true); this.error.set('');
     this.http.put(`/api/persons/${person.id}/access`, {username:this.personPermissionUsername.trim(),can_view:canView}, {headers:this.headers()}).subscribe({next: () => {
-      this.busy.set(false); this.notice.set(canView ? '인물 정보와 얼굴 사진 접근을 허용했습니다.' : '인물 접근 권한을 해제했습니다.'); this.personPermissionUsername='';
+      this.busy.set(false); this.notice.set(canView ? 'Access to person details and face images granted.' : 'Person access revoked.'); this.personPermissionUsername='';
     }, error: err => {this.busy.set(false); this.handleError(err);}});
   }
   retryReferences() {
     this.busy.set(true);
     this.http.post<{pending:number}>('/api/persons/maintenance/retry', {}, {headers:this.headers()}).pipe(timeout(60000)).subscribe({next: result => {
-      this.busy.set(false); this.refreshPersons(); this.notice.set(result.pending ? `${result.pending}건의 검색 반영·삭제 작업을 재시도 중입니다.` : '등록 및 삭제 작업을 반영했습니다.');
+      this.busy.set(false); this.refreshPersons(); this.notice.set(result.pending ? `Retrying ${result.pending} search synchronization/deletion tasks.` : 'Registration and deletion changes applied.');
     }, error: err => {this.busy.set(false); this.handleError(err);}});
   }
 
   edit(camera: Camera) {
     this.editingId = camera.camera_id;
     this.cameraForm = {name: camera.name, description: camera.description, location: camera.location, enabled: camera.enabled, rtsp_url: '', source_type: camera.source_type};
-    this.notice.set(camera.source_type === 'rtsp' ? '수정할 카메라의 RTSP 주소를 계정 정보와 함께 다시 입력해 주세요. 저장하면 분석이 중지됩니다.' : '저장하면 진행 중인 분석이 중지됩니다.');
+    this.notice.set(camera.source_type === 'rtsp' ? 'Re-enter the camera RTSP address with its credentials. Saving stops analysis.' : 'Saving stops active analysis.');
   }
   cancelEdit() { this.editingId = null; this.cameraForm = this.emptyForm(); this.notice.set(''); }
 
   saveCamera() {
     if (this.busy()) return;
-    if (!this.cameraForm.name.trim()) { this.error.set('카메라 이름을 입력해 주세요.'); return; }
+    if (!this.cameraForm.name.trim()) { this.error.set('Enter a camera name.'); return; }
     if (this.cameraForm.source_type === 'rtsp' && !this.cameraForm.rtsp_url.trim()) {
-      this.error.set('CCTV 입력에서는 RTSP 주소를 입력해 주세요.'); return;
+      this.error.set('Enter an RTSP address for the CCTV input.'); return;
     }
     this.busy.set(true); this.error.set('');
     const payload = {...this.cameraForm, rtsp_url:this.cameraForm.source_type === 'mp4' ? '' : this.cameraForm.rtsp_url};
@@ -441,15 +441,15 @@ export class AppComponent implements OnDestroy {
       ? this.http.post<Camera>('/api/cameras', payload, {headers: this.headers()})
       : this.http.put<Camera>(`/api/cameras/${this.editingId}`, payload, {headers: this.headers()});
     request.pipe(timeout(10000)).subscribe({
-      next: () => { this.busy.set(false); this.cancelEdit(); this.refresh(); this.notice.set('카메라 정보를 저장했습니다.'); },
-      error: err => { this.busy.set(false); if (err.status === 409) this.error.set('같은 이름의 카메라가 이미 있습니다.'); else this.handleError(err); }
+      next: () => { this.busy.set(false); this.cancelEdit(); this.refresh(); this.notice.set('Camera details saved.'); },
+      error: err => { this.busy.set(false); if (err.status === 409) this.error.set('A camera with this name already exists.'); else this.handleError(err); }
     });
   }
 
   deleteCamera(camera: Camera) {
-    if (!window.confirm(`“${camera.name}” 카메라를 삭제할까요?`)) return;
+    if (!window.confirm(`“${camera.name}” Delete this camera?`)) return;
     this.http.delete(`/api/cameras/${camera.camera_id}`, {headers: this.headers()}).subscribe({
-      next: () => { this.cancelEdit(); this.refresh(); this.notice.set('카메라를 삭제했습니다.'); }, error: err => this.handleError(err)
+      next: () => { this.cancelEdit(); this.refresh(); this.notice.set('Camera deleted.'); }, error: err => this.handleError(err)
     });
   }
 
@@ -462,7 +462,7 @@ export class AppComponent implements OnDestroy {
     const camera = this.cameras().find(value => value.camera_id === id && value.can_view);
     if (!camera) {
       this.selectedCamera.set(null); this.analysis.set(null);
-      if (this.liveRouteId !== null) this.error.set('카메라를 찾을 수 없거나 영상 접근 권한이 없습니다. 목록에서 다시 선택해 주세요.');
+      if (this.liveRouteId !== null) this.error.set('Camera not found or video access denied. Select another camera from the list.');
       return;
     }
     if (this.selectedCamera()?.camera_id !== camera.camera_id) {
@@ -526,7 +526,7 @@ export class AppComponent implements OnDestroy {
     const camera = this.selectedCamera(); if (!camera?.can_operate || this.busy()) return;
     this.busy.set(true);
     this.http.post<AnalysisStatus>(`/api/cameras/${camera.camera_id}/stop`, {}, {headers:this.headers()}).pipe(timeout(30000)).subscribe({
-      next: value => { this.analysis.set(value); this.busy.set(false); this.notice.set('분석을 중지했습니다.'); },
+      next: value => { this.analysis.set(value); this.busy.set(false); this.notice.set('Analysis stopped.'); },
       error: err => { this.busy.set(false); this.handleError(err); }
     });
   }
@@ -535,11 +535,11 @@ export class AppComponent implements OnDestroy {
     const file = input.files?.[0], camera = this.selectedCamera();
     if (!file || !camera || this.busy()) return;
     if (!file.name.toLowerCase().endsWith('.mp4') || file.size > 200 * 1024 * 1024) {
-      this.error.set('200 MB 이하의 MP4 파일을 선택해 주세요.'); input.value = ''; return;
+      this.error.set('Choose an MP4 file up to 200 MB.'); input.value = ''; return;
     }
     this.busy.set(true); this.error.set('');
     this.http.put<Camera>(`/api/cameras/${camera.camera_id}/video`, file, {params:{filename:file.name}, headers:{...this.headers(), 'Content-Type':'video/mp4'}}).pipe(timeout(120000)).subscribe({
-      next: value => { this.selectedCamera.set(value); this.analysisSource = 'mp4'; this.busy.set(false); this.notice.set('시험 영상을 업로드했습니다. 분석 시작을 눌러 주세요.'); this.refresh(); input.value = ''; },
+      next: value => { this.selectedCamera.set(value); this.analysisSource = 'mp4'; this.busy.set(false); this.notice.set('Test video uploaded. Click Start Analysis.'); this.refresh(); input.value = ''; },
       error: err => { this.busy.set(false); this.handleError(err); input.value = ''; }
     });
   }
@@ -553,36 +553,36 @@ export class AppComponent implements OnDestroy {
   }
   candidateCount() {return (this.analysis()?.result?.tracks || []).filter(track => track.face?.matches?.length).length;}
   faceLabel(face?: FaceStatus) {
-    if (face?.embedding_ready) return '얼굴 특징 준비됨';
-    const labels: Record<string,string> = {pending:'얼굴 검사 대기', no_face:'얼굴이 보이지 않음', ambiguous:'얼굴 연결 보류', rejected:'품질 기준 미달', capacity:'얼굴 검사 대기'};
-    return labels[face?.status || ''] || '얼굴 검사 대기';
+    if (face?.embedding_ready) return 'Face features ready';
+    const labels: Record<string,string> = {pending:'Waiting for face analysis', no_face:'No face visible', ambiguous:'Face association pending', rejected:'Below quality threshold', capacity:'Waiting for face analysis'};
+    return labels[face?.status || ''] || 'Waiting for face analysis';
   }
   faceReasons(face?: FaceStatus) {
-    const labels: Record<string,string> = {no_face:'얼굴 미검출', multiple_faces:'여러 얼굴 검출', face_too_small:'얼굴이 작음', face_clipped:'얼굴이 화면 밖으로 잘림', invalid_face_box:'얼굴 영역 오류', blurred:'흐린 영상', too_dark:'너무 어두움', too_bright:'너무 밝음', low_confidence:'탐지 신뢰도 부족', landmark_geometry:'landmark 불안정 또는 가림 가능성', pose_exceeded:'얼굴 각도 기준 초과', pose_unavailable:'자세 측정 불가', quality_below_threshold:'종합 품질 부족', cache_capacity:'검사 용량 제한'};
+    const labels: Record<string,string> = {no_face:'No face detected', multiple_faces:'Multiple faces detected', face_too_small:'Face too small', face_clipped:'Face extends beyond the frame', invalid_face_box:'Invalid face region', blurred:'Blurry video', too_dark:'Too dark', too_bright:'Too bright', low_confidence:'Low detection confidence', landmark_geometry:'landmark unstable or possibly occluded', pose_exceeded:'Face pose exceeds limits', pose_unavailable:'Pose unavailable', quality_below_threshold:'Low overall quality', cache_capacity:'Analysis capacity limit'};
     return (face?.reasons || []).map(reason => labels[reason] || reason).join(' · ');
   }
   previewUrl() { return `/api/cameras/${this.selectedCamera()?.camera_id}/preview?v=${this.previewVersion()}`; }
   reconnectPreview() { this.previewFailed.set(false); this.previewVersion.update(value => value + 1); }
   analysisLabel(state: string | undefined = this.analysis()?.state) {
-    const labels: Record<string,string> = {stopped:'중지됨', opening:'영상 연결 중', running:'분석 중', reconnecting:'자동 재연결 중', draining:'마지막 프레임 처리 중', stopping:'중지 중', ended:'영상 재생 완료', error:'연결 또는 분석 실패', unavailable:'상태 조회 실패', forbidden:'조회 권한 없음'};
-    return labels[state || ''] || '상태 확인 중';
+    const labels: Record<string,string> = {stopped:'Stopped', opening:'Connecting to video', running:'Analyzing', reconnecting:'Reconnecting automatically', draining:'Processing final frame', stopping:'Stopping', ended:'Playback complete', error:'Connection or analysis failed', unavailable:'Status unavailable', forbidden:'No view permission'};
+    return labels[state || ''] || 'Checking status';
   }
   analysisError() {
     if (this.analysis()?.state === 'reconnecting') return '';
-    const labels: Record<string,string> = {source_open_failed:'영상을 열지 못했습니다. 카메라 접속 정보와 네트워크를 확인하세요.', source_read_failed:'영상 수신이 끊겼습니다. 분석을 다시 시작하세요.', source_resolution_exceeded:'지원하는 최대 입력 해상도는 3840×2160입니다.', capture_failed:'영상 수신에 실패했습니다.', inference_failed:'영상 분석에 실패했습니다. 분석 서비스를 확인하세요.', video_seek_failed:'시험 영상을 다시 재생하지 못했습니다.'};
+    const labels: Record<string,string> = {source_open_failed:'Could not open the video. Check the camera credentials and network.', source_read_failed:'Video reception stopped. Restart analysis.', source_resolution_exceeded:'Maximum supported input resolution: 3840×2160.', capture_failed:'Video reception failed.', inference_failed:'Video analysis failed. Check the analysis service.', video_seek_failed:'Could not replay the test video.'};
     return labels[this.analysis()?.error_code || ''] || '';
   }
   reconnectLabel() {
     const seconds = this.analysis()?.next_retry_seconds;
     return seconds === null || seconds === undefined
-      ? '카메라 연결을 다시 시도하고 있습니다.'
-      : `약 ${Math.ceil(seconds)}초 후 다시 연결합니다.`;
+      ? 'Retrying the camera connection.'
+      : `Reconnecting in about ${Math.ceil(seconds)} seconds.`;
   }
-  serviceLabel(value: string | undefined) { return value === 'ok' ? '정상' : value === 'unavailable' ? '연결 실패' : '확인 중'; }
+  serviceLabel(value: string | undefined) { return value === 'ok' ? 'Healthy' : value === 'unavailable' ? 'Connection failed' : 'Checking'; }
   gpuLabel() {
     const gpu = this.status()?.gpu;
-    if (gpu?.status === 'passed') return gpu.actual_device === 'cuda' ? 'CUDA 검증 통과' : 'CPU 검증 통과';
-    if (gpu?.status === 'cpu_fallback') return 'CPU로 대체 실행';
-    return gpu?.status === 'failed' ? '검증 실패' : '아직 검증되지 않음';
+    if (gpu?.status === 'passed') return gpu.actual_device === 'cuda' ? 'CUDA Validation passed' : 'CPU Validation passed';
+    if (gpu?.status === 'cpu_fallback') return 'CPU fallback';
+    return gpu?.status === 'failed' ? 'Validation failed' : 'Not yet validated';
   }
 }

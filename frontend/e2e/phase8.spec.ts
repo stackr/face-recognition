@@ -1,17 +1,17 @@
 import {expect, test} from '@playwright/test';
 import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 
-test('Phase 8 CUDA 검색 이벤트 클립 저장, 인증 재생과 삭제', async ({page, playwright}) => {
+test('CUDA event clips, authenticated playback and deletion', async ({page, playwright}) => {
   test.setTimeout(90000);
   const credentials = readFileSync('../data/local-admin.txt', 'utf8');
   const prefix = `CLIP-E2E-${Date.now()}`;
   let personId: number | undefined, cameraId: number | undefined;
   let headers: Record<string, string> = {};
   await page.goto('/');
-  await page.getByLabel('아이디', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
-  await page.getByLabel('비밀번호', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
-  await page.getByRole('button', {name:'로그인', exact:true}).click();
-  await expect(page.getByRole('heading', {name:'시스템 준비 상태'})).toBeVisible();
+  await page.getByLabel('Username', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
+  await page.getByLabel('Password', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
+  await page.getByRole('button', {name:'Log In', exact:true}).click();
+  await expect(page.getByRole('heading', {name:'System Readiness'})).toBeVisible();
   headers = {'X-CSRF-Token':(await (await page.request.get('/api/auth/me')).json()).csrf_token};
   try {
     personId = (await (await page.request.post('/api/persons', {headers, data:{name:prefix}})).json()).id;
@@ -29,7 +29,7 @@ test('Phase 8 CUDA 검색 이벤트 클립 저장, 인증 재생과 삭제', asy
     }, {timeout:35000}).toBe('ready');
     expect(event.clip_details.partial).toBe(true);
     const card = page.locator(`.event-card[data-event-id="${event.event_id}"]`);
-    await expect(card.locator('summary')).toContainText('일부 구간');
+    await expect(card.locator('summary')).toContainText('Partial segment');
     await card.locator('summary').click();
     const video = card.locator('video');
     await video.evaluate((element:HTMLVideoElement) => element.load());

@@ -40,7 +40,7 @@ export class RecognitionLogsComponent implements OnChanges, OnDestroy {
   ngOnDestroy() {window.clearInterval(this.timer);}
   applyFilters() {
     if (this.deleting()) return;
-    if (this.filters.start && this.filters.end && new Date(this.filters.start) >= new Date(this.filters.end)) {this.error.set('종료 시각은 시작 시각보다 뒤여야 합니다.'); return;}
+    if (this.filters.start && this.filters.end && new Date(this.filters.start) >= new Date(this.filters.end)) {this.error.set('End time must be later than start time.'); return;}
     this.appliedFilters = {...this.filters}; this.cursors = [undefined]; this.pageNumber = 1; this.load();
   }
   reset() {this.filters = {camera_id: '', outcome: '', reason: '', start: '', end: ''}; this.applyFilters();}
@@ -60,25 +60,25 @@ export class RecognitionLogsComponent implements OnChanges, OnDestroy {
         if (version !== this.version) return;
         this.loading.set(false); this.page.set(null);
         if (error.status === 401) this.sessionExpired.emit();
-        this.error.set(error.status === 403 ? '이 카메라의 로그를 조회할 권한이 없습니다.' : '로그를 불러오지 못했습니다. 서버 연결과 검색 조건을 확인해 주세요.');
+        this.error.set(error.status === 403 ? 'You do not have permission to view this camera logs.' : 'Could not load logs. Check the server connection and filters.');
       }
     });
   }
   deleteAll() {
     if (!this.canDelete || this.loading() || this.deleting()
-      || !window.confirm('검색 조건과 관계없이 모든 카메라의 전체 얼굴 검사 로그를 삭제할까요? 삭제 후 복구할 수 없습니다.')) return;
+      || !window.confirm('Delete all face analysis logs for every camera, regardless of the current filters? This cannot be undone.')) return;
     ++this.version;
     this.deleting.set(true); this.error.set(''); this.notice.set('');
     this.http.delete<{deleted_count: number}>('/api/recognition-logs', {headers:this.requestHeaders}).pipe(timeout(12000), takeUntilDestroyed(this.destroyRef)).subscribe({
       next: result => {
         this.deleting.set(false); this.page.set(null);
-        this.notice.set(`전체 로그 ${result.deleted_count.toLocaleString()}건을 삭제했습니다.`);
+        this.notice.set(`Deleted ${result.deleted_count.toLocaleString("en-US")} log records.`);
         this.latest();
       },
       error: (error: HttpErrorResponse) => {
         this.deleting.set(false);
         if (error.status === 401) this.sessionExpired.emit();
-        this.error.set(error.status === 403 ? '전체 로그를 삭제할 권한이 없습니다.' : '로그 삭제 결과를 확인하지 못했습니다. 최신 기록을 조회해 주세요.');
+        this.error.set(error.status === 403 ? 'You do not have permission to delete all logs.' : 'Could not confirm log deletion. Reload the latest records.');
       }
     });
   }

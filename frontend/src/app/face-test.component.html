@@ -1,58 +1,58 @@
 @if (error()) {<div class="alert alert-danger" role="alert">{{ error() }}</div>}
 @if (notice()) {<div class="alert alert-info" role="status">{{ notice() }}</div>}
 <section class="card face-test-upload">
-  <h2>시험 영상 업로드</h2>
+  <h2>Upload Test Video</h2>
   <form (ngSubmit)="analyze()">
     <div class="face-test-settings">
       <div>
-        <label for="face-test-threshold" class="form-label">검출 기준</label>
+        <label for="face-test-threshold" class="form-label">Detection Threshold</label>
         <input id="face-test-threshold" name="detectionThreshold" type="number" class="form-control" min="0.1" max="0.99" step="0.01" required [(ngModel)]="detectionThreshold" [disabled]="!result() || uploading() || deleting()" aria-describedby="face-test-threshold-help">
-        <p id="face-test-threshold-help" class="face-test-help">얼굴 검출 신뢰도 0.10~0.99 · 기본값 {{ result()?.defaults?.detection_threshold ?? 0.5 | number:'1.2-2' }}. 기준 이상인 얼굴을 추출합니다.</p>
+        <p id="face-test-threshold-help" class="face-test-help">Face detection confidence: 0.10–0.99 · Default: {{ result()?.defaults?.detection_threshold ?? 0.5 | number:'1.2-2' }}. Extracts faces meeting the threshold.</p>
       </div>
       <div>
-        <label for="face-test-min-size" class="form-label">최소 얼굴 크기 (px)</label>
+        <label for="face-test-min-size" class="form-label">Minimum Face Size (px)</label>
         <input id="face-test-min-size" name="minFaceSize" type="number" class="form-control" min="8" max="512" step="1" required [(ngModel)]="minFaceSize" [disabled]="!result() || uploading() || deleting()" aria-describedby="face-test-min-size-help">
-        <p id="face-test-min-size-help" class="face-test-help">8~512 px · 기본값 {{ result()?.defaults?.min_face_size ?? 8 }} px. 원본 영상의 얼굴 영역에서 가로·세로 중 짧은 변을 기준으로 합니다.</p>
+        <p id="face-test-min-size-help" class="face-test-help">8~512 px · Default {{ result()?.defaults?.min_face_size ?? 8 }} px. Uses the shorter side of the face region in the source video.</p>
       </div>
       <div>
-        <label for="face-test-match-threshold" class="form-label">비교점수 기준</label>
+        <label for="face-test-match-threshold" class="form-label">Similarity Threshold</label>
         <input id="face-test-match-threshold" name="matchThreshold" type="number" class="form-control" min="-1" max="1" step="0.01" required [(ngModel)]="matchThreshold" [disabled]="!result() || uploading() || deleting()" aria-describedby="face-test-match-threshold-help">
-        <p id="face-test-match-threshold-help" class="face-test-help">얼굴 유사도 -1~1 · 기본값 {{ result()?.defaults?.match_threshold ?? 0.75 | number:'1.2-2' }}. 같은 인물로 묶기와 분석 후 재병합에 사용합니다. 낮추면 더 많이 합쳐지고, 다른 인물도 합쳐질 수 있습니다.</p>
+        <p id="face-test-match-threshold-help" class="face-test-help">Face similarity: -1–1 · Default: {{ result()?.defaults?.match_threshold ?? 0.75 | number:'1.2-2' }}. Used for initial grouping and post-analysis merging. Lower values merge more groups and may combine different people.</p>
       </div>
     </div>
-    <p class="face-test-help">입력한 값은 [영상 분석]을 누를 때 해당 영상에 적용됩니다. 검출 기준과 최소 크기를 높이면 작은 얼굴이나 신뢰도가 낮은 후보를 제외합니다.</p>
-    @if (!validSettings()) {<p class="text-danger face-test-help" role="alert">검출 기준은 0.10~0.99, 최소 얼굴 크기는 8~512 사이의 정수, 비교점수 기준은 -1~1로 입력해 주세요.</p>}
-    <label for="face-test-video" class="form-label">분석할 영상 파일</label>
+    <p class="face-test-help">These values apply when you click Analyze Video. Higher detection thresholds and minimum sizes exclude small faces and low-confidence candidates.</p>
+    @if (!validSettings()) {<p class="text-danger face-test-help" role="alert">Enter a detection threshold from 0.10 to 0.99, an integer minimum face size from 8 to 512, and a similarity threshold from -1 to 1.</p>}
+    <label for="face-test-video" class="form-label">Video File to Analyze</label>
     <input #videoInput id="face-test-video" type="file" accept="video/*,.mp4,.mov,.avi,.mkv,.webm" class="form-control" (change)="selectVideo($event)" [disabled]="uploading() || deleting()">
-    <p class="face-test-help">{{ result()?.limits?.upload_max_mb ?? 200 }} MB 이하 · 최대 {{ (result()?.limits?.max_duration_seconds ?? 3600) / 60 }}분 · 3840×2160 이하. MP4, MOV, AVI, MKV, WebM 등 서버에서 읽을 수 있는 영상.</p>
-    <button type="submit" class="btn btn-primary" [disabled]="!selectedFile() || !validSettings() || !result()?.can_start || uploading() || deleting()">{{ uploading() ? '영상 업로드 중…' : '영상 분석' }}</button>
-    @if (uploading()) {<p class="face-test-help" role="status">영상 업로드 중{{ uploadPercent() !== null ? ' · ' + uploadPercent() + '%' : '…' }}</p>}
+    <p class="face-test-help">{{ result()?.limits?.upload_max_mb ?? 200 }} MB or less · Up to {{ (result()?.limits?.max_duration_seconds ?? 3600) / 60 }} minutes · 3840×2160 or less. Supported formats include MP4, MOV, AVI, MKV and WebM.</p>
+    <button type="submit" class="btn btn-primary" [disabled]="!selectedFile() || !validSettings() || !result()?.can_start || uploading() || deleting()">{{ uploading() ? 'Uploading video…' : 'Analyze Video' }}</button>
+    @if (uploading()) {<p class="face-test-help" role="status">Uploading video{{ uploadPercent() !== null ? ' · ' + uploadPercent() + '%' : '…' }}</p>}
   </form>
-  <p class="face-test-help mb-0">모든 프레임에서 얼굴을 검출하고, 분석이 끝나면 분리된 묶음을 다시 비교해 유사한 묶음을 합친 뒤 가장 선명한 사진 한 장을 표시합니다. 같은 프레임에 함께 나온 얼굴은 합치지 않습니다. 흐릿하거나 옆으로 향한 얼굴은 묶음이 나뉘거나 섞일 수 있습니다. 사진과 목록은 {{ result()?.limits?.retention_hours ?? 24 }}시간 후 자동 삭제됩니다.</p>
-  @if (result() && !result()!.can_start && !hasActiveJob()) {<p class="face-test-help">다른 영상 분석이 진행 중이거나 보관 목록이 가득 찼습니다. 잠시 기다리거나 목록을 삭제해 주세요.</p>}
+  <p class="face-test-help mb-0">Detects faces in every frame, then compares and merges similar groups after analysis and shows the clearest image from each group. Faces appearing together in the same frame are never merged. Blurry or side-facing faces may be split into separate groups or grouped incorrectly. Images and results are deleted after {{ result()?.limits?.retention_hours ?? 24 }} hours.</p>
+  @if (result() && !result()!.can_start && !hasActiveJob()) {<p class="face-test-help">Another video is being analyzed or the saved-results limit has been reached. Please wait or delete the results.</p>}
 </section>
-<section class="card face-test-results" aria-label="추출 얼굴 목록">
-  <div class="face-test-list-heading"><div><h2>추출 얼굴</h2><span class="text-secondary">{{ current()?.groups?.length ?? 0 }}개 인물 묶음</span></div><button class="btn btn-outline-danger" type="button" (click)="deleteAll()" [disabled]="!result()?.items?.length || uploading() || deleting()">{{ deleting() ? '삭제 중…' : '목록 전체 삭제' }}</button></div>
+<section class="card face-test-results" aria-label="Extracted Faces">
+  <div class="face-test-list-heading"><div><h2>Extracted Faces</h2><span class="text-secondary">{{ current()?.groups?.length ?? 0 }} person groups</span></div><button class="btn btn-outline-danger" type="button" (click)="deleteAll()" [disabled]="!result()?.items?.length || uploading() || deleting()">{{ deleting() ? 'Deleting…' : 'Delete All Results' }}</button></div>
   @if ((result()?.items?.length ?? 0) > 1) {
-    <label for="face-test-history" class="form-label">분석 결과 영상</label><select id="face-test-history" class="form-select mb-3" [value]="selectedId()" (change)="selectJob($event)">@for (job of result()!.items; track job.job_id) {<option [value]="job.job_id">{{ job.filename }} · {{ stateLabel(job.state) }}</option>}</select>
+    <label for="face-test-history" class="form-label">Analyzed Video</label><select id="face-test-history" class="form-select mb-3" [value]="selectedId()" (change)="selectJob($event)">@for (job of result()!.items; track job.job_id) {<option [value]="job.job_id">{{ job.filename }} · {{ stateLabel(job.state) }}</option>}</select>
   }
   @if (current(); as job) {
     <div class="face-test-progress" role="status" [attr.aria-busy]="active(job)">
       <strong>{{ stateLabel(job.state) }}</strong><span>{{ job.filename }}</span>
-      <span>{{ job.processed_frames | number }} / {{ job.total_frames !== null ? (job.total_frames | number) : '확인 중' }} 프레임 · 얼굴 {{ job.detections | number }}회 검출</span>
-      @if (job.progress_percent !== null) {<progress [value]="job.progress_percent" max="100" aria-label="영상 분석 진행률"></progress><span>{{ job.progress_percent }}%</span>}
-      <small class="face-test-applied-match">적용한 비교점수 기준 {{ job.threshold | number:'1.2-2' }} · {{ job.actual_device }}</small>
-      @if (job.detection_threshold !== undefined && job.min_face_size !== undefined) {<small class="face-test-applied-settings">적용한 검출 기준 {{ job.detection_threshold | number:'1.2-2' }} · 최소 얼굴 크기 {{ job.min_face_size }} px</small>}
-      @if (job.state === 'completed' && job.groups_before_merge !== undefined && job.groups_before_merge !== null) {<small class="face-test-merge-result">묶음 재비교 완료 · {{ job.groups_before_merge }}개 → {{ job.groups.length }}개 · {{ job.merged_group_count ?? 0 }}개 병합</small>}
+      <span>{{ job.processed_frames | number }} / {{ job.total_frames !== null ? (job.total_frames | number) : 'Checking' }} frames · Faces {{ job.detections | number }} detections</span>
+      @if (job.progress_percent !== null) {<progress [value]="job.progress_percent" max="100" aria-label="Video Analysis Progress"></progress><span>{{ job.progress_percent }}%</span>}
+      <small class="face-test-applied-match">Applied Similarity Threshold {{ job.threshold | number:'1.2-2' }} · {{ job.actual_device }}</small>
+      @if (job.detection_threshold !== undefined && job.min_face_size !== undefined) {<small class="face-test-applied-settings">Applied Detection Threshold {{ job.detection_threshold | number:'1.2-2' }} · Minimum Face Size {{ job.min_face_size }} px</small>}
+      @if (job.state === 'completed' && job.groups_before_merge !== undefined && job.groups_before_merge !== null) {<small class="face-test-merge-result">Group comparison complete · {{ job.groups_before_merge }} items → {{ job.groups.length }} items · {{ job.merged_group_count ?? 0 }} groups merged</small>}
     </div>
-    @if (job.state === 'failed') {<div class="alert alert-warning" role="alert">{{ errorLabel(job.error_code) }} 아래는 중단 전까지 추출한 결과입니다.</div>}
+    @if (job.state === 'failed') {<div class="alert alert-warning" role="alert">{{ errorLabel(job.error_code) }} Results extracted before interruption are shown below.</div>}
     <div class="face-test-grid">
       @for (group of job.groups; track group.group_id) {
-        <article class="face-test-card"><img [src]="imageUrl(job, group)" [alt]="'인물 ' + group.group_id + ' 대표 얼굴'" loading="lazy" width="256" height="256">
-          <div><h3>인물 {{ group.group_id }}</h3><span>{{ group.occurrences | number }}회 검출</span><small>첫 등장 {{ group.first_seen_seconds | number:'1.1-1' }}초 · 마지막 {{ group.last_seen_seconds | number:'1.1-1' }}초</small>
-          @if (!group.embedding_ready) {<small class="face-test-unresolved">얼굴 비교 불가 · 위치로 임시 묶음</small>}</div>
+        <article class="face-test-card"><img [src]="imageUrl(job, group)" [alt]="'Person ' + group.group_id + ' Representative Face'" loading="lazy" width="256" height="256">
+          <div><h3>Person {{ group.group_id }}</h3><span>{{ group.occurrences | number }} detections</span><small>First Seen {{ group.first_seen_seconds | number:'1.1-1' }} seconds · Last {{ group.last_seen_seconds | number:'1.1-1' }} seconds</small>
+          @if (!group.embedding_ready) {<small class="face-test-unresolved">Face comparison unavailable · Temporarily grouped by position</small>}</div>
         </article>
-      } @empty {<p class="face-test-empty">{{ active(job) ? '얼굴을 찾고 있습니다. 추출되는 대로 표시합니다.' : job.state === 'completed' ? '이 영상에서 검출된 얼굴이 없습니다.' : '추출된 얼굴이 없습니다.' }}</p>}
+      } @empty {<p class="face-test-empty">{{ active(job) ? 'Detecting faces. Results appear as they are extracted.' : job.state === 'completed' ? 'No faces detected in this video.' : 'No extracted faces.' }}</p>}
     </div>
-  } @else {<p class="face-test-empty">{{ loading() ? '분석 목록을 불러오고 있습니다.' : '영상을 선택하고 [영상 분석] 버튼을 눌러 주세요.' }}</p>}
+  } @else {<p class="face-test-empty">{{ loading() ? 'Loading analysis results.' : 'Select a video and click Analyze Video.' }}</p>}
 </section>

@@ -67,10 +67,10 @@ export class FaceTestComponent implements OnChanges, OnDestroy {
     const input = event.target as HTMLInputElement;
     const file = input.files?.[0] ?? null;
     if (file && file.size > (this.result()?.limits.upload_max_mb ?? 200) * 1024 * 1024) {
-      this.error.set(`영상은 ${this.result()?.limits.upload_max_mb ?? 200} MB 이하로 선택해 주세요.`);
+      this.error.set(`Choose a video up to ${this.result()?.limits.upload_max_mb ?? 200} MB.`);
       this.selectedFile.set(null); input.value = ''; return;
     }
-    if (file && !file.size) {this.error.set('빈 파일은 분석할 수 없습니다.'); this.selectedFile.set(null); input.value = ''; return;}
+    if (file && !file.size) {this.error.set('Empty files cannot be analyzed.'); this.selectedFile.set(null); input.value = ''; return;}
     this.selectedFile.set(file);
   }
   selectJob(event: Event) {this.selectedId.set((event.target as HTMLSelectElement).value);}
@@ -109,7 +109,7 @@ export class FaceTestComponent implements OnChanges, OnDestroy {
           const job = event.body;
           this.result.update(result => result ? {...result, can_start:false, items:[job, ...result.items]} : result);
           this.selectedId.set(job.job_id); this.uploading.set(false); this.savingChange.emit(false);
-          this.notice.set('영상을 업로드했습니다. 모든 프레임을 순서대로 분석합니다.');
+          this.notice.set('Video uploaded. Analyzing all frames sequentially.');
           this.load(false);
         }
       }, error: error => {this.uploading.set(false); this.savingChange.emit(false); this.failed(error);}
@@ -117,7 +117,7 @@ export class FaceTestComponent implements OnChanges, OnDestroy {
   }
   deleteAll() {
     if (!this.result()?.items.length || this.uploading() || this.deleting()) return;
-    if (!window.confirm('분석 중인 작업을 중지하고 모든 분석 목록과 추출 사진을 삭제할까요?')) return;
+    if (!window.confirm('Stop active analysis and delete all analysis results and extracted images?')) return;
     ++this.version; this.loading.set(false); this.deleting.set(true); this.savingChange.emit(true); this.error.set(''); this.notice.set('');
     this.http.delete('/api/face-tests', {headers:this.requestHeaders}).pipe(timeout(35000), takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
@@ -125,26 +125,26 @@ export class FaceTestComponent implements OnChanges, OnDestroy {
         this.selectedId.set(''); this.selectedFile.set(null);
         if (this.videoInput) this.videoInput.nativeElement.value = '';
         this.deleting.set(false); this.savingChange.emit(false);
-        this.notice.set('모든 분석 목록과 추출 사진을 삭제했습니다.'); this.load(false);
+        this.notice.set('All analysis results and extracted images deleted.'); this.load(false);
       }, error: error => {this.deleting.set(false); this.savingChange.emit(false); this.failed(error);}
     });
   }
   imageUrl(job: FaceJob, group: FaceGroup) {return `/api/face-tests/${job.job_id}/groups/${group.group_id}/image?frame=${group.best_frame}`;}
-  stateLabel(state: string) {return ({queued:'분석 준비 중', running:'영상 분석 중', merging:'얼굴 묶음 병합 중', completed:'분석 완료', failed:'분석 실패', cancelled:'분석 중지'} as Record<string,string>)[state] ?? state;}
+  stateLabel(state: string) {return ({queued:'Preparing analysis', running:'Analyzing video', merging:'Merging face groups', completed:'Analysis complete', failed:'Analysis failed', cancelled:'Analysis stopped'} as Record<string,string>)[state] ?? state;}
   errorLabel(code: string | null) {
-    return ({invalid_video:'영상을 읽을 수 없습니다. 지원되는 영상 파일과 해상도(최대 3840×2160)를 확인해 주세요.',
-      duration_limit_exceeded:'영상 길이 또는 프레임 수 제한을 초과했습니다. 더 짧은 영상으로 시험해 주세요.',
-      face_limit_exceeded:'한 프레임의 얼굴 수가 처리 제한을 초과했습니다.', group_limit_exceeded:'추출 인물 수가 처리 제한을 초과했습니다.',
-      storage_limit_exceeded:'시험 영상 저장 공간이 부족합니다. 목록을 삭제한 후 다시 분석해 주세요.',
-      video_decode_incomplete:'영상 일부를 읽지 못해 분석을 완료하지 못했습니다.', worker_restarted:'분석 서비스가 재시작되어 분석이 중단되었습니다.',
-      cancelled:'분석이 중지되었습니다.'} as Record<string,string>)[code ?? ''] ?? '분석을 완료하지 못했습니다. 영상 파일과 분석 서비스 상태를 확인해 주세요.';
+    return ({invalid_video:'Could not read the video. Check the file format and resolution (maximum 3840×2160).',
+      duration_limit_exceeded:'Video duration or frame-count limit exceeded. Try a shorter video.',
+      face_limit_exceeded:'The number of faces in one frame exceeded the processing limit.', group_limit_exceeded:'The number of extracted people exceeded the processing limit.',
+      storage_limit_exceeded:'Test-video storage is full. Delete results before analyzing again.',
+      video_decode_incomplete:'Analysis could not finish because part of the video was unreadable.', worker_restarted:'Analysis stopped because the analysis service restarted.',
+      cancelled:'Analysis stopped.'} as Record<string,string>)[code ?? ''] ?? 'Analysis could not be completed. Check the video file and analysis service.';
   }
   private failed(error: HttpErrorResponse) {
     if (error.status === 401) this.sessionExpired.emit();
-    this.error.set(error.status === 413 ? '영상 파일이 업로드 용량 제한을 초과했습니다.'
-      : error.status === 429 ? '다른 영상이 분석 중이거나 저장 제한에 도달했습니다. 완료를 기다리거나 목록을 삭제해 주세요.'
-      : error.status === 422 ? '영상 파일과 검출 기준·최소 얼굴 크기·비교점수 기준을 확인해 주세요.'
-      : error.status === 415 ? '지원되는 영상 파일을 선택해 주세요.'
-      : '요청을 처리하지 못했습니다. 서버 연결을 확인한 후 새로고침해 주세요.');
+    this.error.set(error.status === 413 ? 'Video exceeds the upload size limit.'
+      : error.status === 429 ? 'Another video is being analyzed or the storage limit has been reached. Wait for completion or delete the results.'
+      : error.status === 422 ? 'Check the video file, detection threshold, minimum face size and similarity threshold.'
+      : error.status === 415 ? 'Select a supported video file.'
+      : 'Could not process the request. Check the server connection and refresh.');
   }
 }

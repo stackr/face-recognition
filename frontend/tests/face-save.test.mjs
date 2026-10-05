@@ -59,7 +59,7 @@ test('failed crop upload preserves the new person and retries only the photo', a
     assert.equal(context.location.hash,'#/persons/42/edit');
     assert.equal(context.app.cropFiles().length,1);
     assert.equal(context.app.busy(),false);
-    assert.match(context.app.error(),/인물 정보는 저장되었습니다/);
+    assert.match(context.app.error(),/Person details saved/);
     context.allowFace(); await context.app.saveCroppedReference(photo);
     assert.deepEqual(context.calls.map(call => call.path),['/api/persons','/api/persons/42/faces','/api/persons/42/faces']);
     assert.equal(context.calls[2].body,photo);
@@ -76,6 +76,6 @@ test('missing name or missing edited person cannot create or upload a face', asy
     context.app.personForm.name='crop-test'; context.app.personEditingId=42;
     await context.app.saveCroppedReference(new Blob(['photo']));
     assert.equal(context.calls.length,0);
-    assert.match(context.app.error(),/다시 불러온/);
+    assert.match(context.app.error(),/Reload person details/);
   } finally {context.close();}
 });

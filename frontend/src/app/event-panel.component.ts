@@ -77,7 +77,7 @@ export class EventFeed {
   private connect() {
     if (!this.active) return;
     const version = ++this.generation;
-    this.state('연결 중');
+    this.state('Connecting');
     const socket = this.connectSocket(); this.socket = socket;
     socket.onmessage = message => {
       if (version !== this.generation || !this.active) return;
@@ -106,7 +106,7 @@ export class EventFeed {
           this.stop(); this.expired();
         }
       });
-      this.state('재연결 대기');
+      this.state('Waiting to reconnect');
       this.reconnectTimer = setTimeout(() => this.connect(), Math.min(10000, 1000 * 2 ** Math.min(this.retry++, 4)));
     };
   }
@@ -165,12 +165,12 @@ export class EventFeed {
         if (version !== this.generation || visibilityVersion !== this.visibilityVersion || !this.active) return;
         this.apply(page.items); this.cursor = page.next_cursor; more = page.has_more;
       }
-      this.apply(this.buffered); this.buffered = []; this.state('연결됨');
-      if (more) {this.state('누락 기록 복구 중'); setTimeout(() => {void this.sync();}, 0);}
+      this.apply(this.buffered); this.buffered = []; this.state('Connected');
+      if (more) {this.state('Recovering missing records'); setTimeout(() => {void this.sync();}, 0);}
     } catch (error: any) {
       if (version !== this.generation || !this.active) return;
       if (error.status === 401) {this.stop(); this.expired();}
-      else {this.state('기록 조회 재시도 중'); this.socket?.close();}
+      else {this.state('Retrying record retrieval'); this.socket?.close();}
     } finally {
       if (version === this.generation) {
         this.syncing = false;
@@ -184,16 +184,16 @@ export class EventFeed {
   selector: 'app-event-panel', standalone: true, imports: [CommonModule, FormsModule],
   template: `
     <section class="card events-panel">
-      <div class="preview-heading"><h2>검색 이벤트</h2><span class="event-connection" [class.connected]="connection() === '연결됨'" role="status">{{ connection() }}</span></div>
-      <p class="event-intro">실시간 후보를 비교하고 검토하세요.</p>
+      <div class="preview-heading"><h2>Search Events</h2><span class="event-connection" [class.connected]="connection() === 'Connected'" role="status">{{ connection() }}</span></div>
+      <p class="event-intro">Compare and review live candidates.</p>
       <div class="event-filters">
-        <div><label for="event-camera">카메라 범위</label><select id="event-camera" class="form-select form-select-sm" [ngModel]="filters().camera" (ngModelChange)="setFilter('camera', $event)"><option value="selected">선택 카메라</option><option value="all">전체 카메라</option></select></div>
-        <div><label for="event-status">이벤트 상태</label><select id="event-status" class="form-select form-select-sm" [ngModel]="filters().status" (ngModelChange)="setFilter('status', $event)"><option value="all">전체 상태</option><option value="candidate">확인 전 후보</option><option value="confirmed">운영자 확인</option><option value="rejected">운영자 거부</option></select></div>
-        <div class="event-person-filter"><label for="event-person">인물 이름</label><input id="event-person" type="search" class="form-control form-control-sm" [ngModel]="filters().person" (ngModelChange)="setFilter('person', $event)" maxlength="120" placeholder="이름으로 검색"></div>
+        <div><label for="event-camera">Camera Scope</label><select id="event-camera" class="form-select form-select-sm" [ngModel]="filters().camera" (ngModelChange)="setFilter('camera', $event)"><option value="selected">Selected camera</option><option value="all">All cameras</option></select></div>
+        <div><label for="event-status">Event Status</label><select id="event-status" class="form-select form-select-sm" [ngModel]="filters().status" (ngModelChange)="setFilter('status', $event)"><option value="all">All statuses</option><option value="candidate">Unconfirmed candidate</option><option value="confirmed">Confirmed by operator</option><option value="rejected">Rejected by operator</option></select></div>
+        <div class="event-person-filter"><label for="event-person">Person Name</label><input id="event-person" type="search" class="form-control form-control-sm" [ngModel]="filters().person" (ngModelChange)="setFilter('person', $event)" maxlength="120" placeholder="Search by name"></div>
       </div>
-      <div class="event-filter-summary"><span>최근 {{ events().length }}건 중 {{ visibleEvents().length }}건 표시</span><button type="button" class="btn btn-sm btn-link" (click)="resetFilters()">필터 초기화</button></div>
+      <div class="event-filter-summary"><span>Showing {{ visibleEvents().length }} of the latest {{ events().length }} events</span><button type="button" class="btn btn-sm btn-link" (click)="resetFilters()">Reset Filters</button></div>
       @if (deletableEvents().length) {
-        <div class="event-list-actions"><button type="button" class="btn btn-sm btn-outline-danger" (click)="deleteVisible()" [disabled]="reviewing() || deleting()">{{ deleting() ? '삭제 중…' : '목록 삭제' }}</button><small>현재 표시된 삭제 가능 이벤트 {{ deletableEvents().length }}건</small></div>
+        <div class="event-list-actions"><button type="button" class="btn btn-sm btn-outline-danger" (click)="deleteVisible()" [disabled]="reviewing() || deleting()">{{ deleting() ? 'Deleting…' : 'Delete List' }}</button><small>{{ deletableEvents().length }} displayed events can be deleted</small></div>
       }
       @if (error()) {<div class="alert alert-warning" role="alert">{{ error() }}</div>}
       <div class="event-grid">
@@ -201,47 +201,47 @@ export class EventFeed {
           <article class="event-card" [attr.data-event-id]="event.event_id" [class.event-confirmed]="event.status === 'confirmed'" [class.event-rejected]="event.status === 'rejected'">
             <div class="event-details"><div class="event-card-heading"><strong>{{ event.person_name }}</strong><span class="event-status">{{ statusLabel(event.status) }}</span></div>
               <div class="event-photo-pair">
-                <figure><figcaption>현재 등록 얼굴</figcaption>
-                  @if (referenceUrl(event); as url) {<img class="event-reference-image" [src]="url" [alt]="event.person_name + '의 현재 등록 얼굴'" width="112" height="112" loading="lazy" (error)="imageFailed(url)">} @else {<div class="event-image-empty">등록 사진 없음</div>}
+                <figure><figcaption>Current Reference Face</figcaption>
+                  @if (referenceUrl(event); as url) {<img class="event-reference-image" [src]="url" [alt]="event.person_name + ' current reference face'" width="112" height="112" loading="lazy" (error)="imageFailed(url)">} @else {<div class="event-image-empty">No reference image</div>}
                 </figure>
-                <figure><figcaption>검출 얼굴</figcaption>
-                  @if (detectedUrl(event); as url) {<img class="event-detected-image" [src]="url" [alt]="event.person_name + ' 검색 후보 얼굴'" width="112" height="112" loading="lazy" (error)="imageFailed(url)">} @else {<div class="event-image-empty">사진 만료·삭제</div>}
+                <figure><figcaption>Detected Face</figcaption>
+                  @if (detectedUrl(event); as url) {<img class="event-detected-image" [src]="url" [alt]="event.person_name + ' Search candidate face'" width="112" height="112" loading="lazy" (error)="imageFailed(url)">} @else {<div class="event-image-empty">Image expired or deleted</div>}
                 </figure>
               </div>
-              <small class="event-camera-name">{{ event.camera_name }} · 추적 #{{ event.track_id }}</small>
+              <small class="event-camera-name">{{ event.camera_name }} · Track #{{ event.track_id }}</small>
               <time [attr.datetime]="event.timestamp">{{ event.timestamp | date:'yyyy-MM-dd HH:mm:ss' }}</time>
-              <div class="event-scores"><span>유사도 <strong>{{ event.face_similarity | number:'1.3-3' }}</strong></span><span>얼굴 품질 <strong>{{ event.face_quality | number:'1.2-2' }}</strong></span></div>
-              @if (event.clip_state === 'pending') {<small>영상 클립 준비 중</small>}
-              @if (event.clip_state === 'failed') {<small>영상 클립 저장 실패 · {{ event.clip_error }}</small>}
-              @if (event.clip_state === 'expired') {<small>영상 클립 보관 기간 만료</small>}
+              <div class="event-scores"><span>Similarity <strong>{{ event.face_similarity | number:'1.3-3' }}</strong></span><span>Face Quality <strong>{{ event.face_quality | number:'1.2-2' }}</strong></span></div>
+              @if (event.clip_state === 'pending') {<small>Preparing video clip</small>}
+              @if (event.clip_state === 'failed') {<small>Video clip storage failed · {{ event.clip_error }}</small>}
+              @if (event.clip_state === 'expired') {<small>Video clip retention expired</small>}
               @if (event.video_clip_url) {
-                <details class="event-clip"><summary>영상 클립{{ event.clip_details?.partial ? ' (일부 구간)' : '' }}</summary>
-                  <video controls preload="none" [src]="event.video_clip_url" style="width:100%" aria-label="검색 이벤트 영상 클립"></video>
-                  <small>검출 전 {{ event.clip_details?.before_seconds | number:'1.1-1' }}초 · 후 {{ event.clip_details?.after_seconds | number:'1.1-1' }}초 · 음성 없음</small>
+                <details class="event-clip"><summary>Video Clip{{ event.clip_details?.partial ? ' (Partial segment)' : '' }}</summary>
+                  <video controls preload="none" [src]="event.video_clip_url" style="width:100%" aria-label="Search Event Video Clip"></video>
+                  <small>Before Detection {{ event.clip_details?.before_seconds | number:'1.1-1' }} seconds · After {{ event.clip_details?.after_seconds | number:'1.1-1' }} seconds · No audio</small>
                 </details>
               }
               <div class="event-actions">
-                @if (event.frame_url) {<button type="button" (click)="openFrame(event)" class="btn btn-sm btn-outline-secondary">검출 프레임</button>}
+                @if (event.frame_url) {<button type="button" (click)="openFrame(event)" class="btn btn-sm btn-outline-secondary">Detected Frame</button>}
                 @if (event.can_review) {
-                  <button class="btn btn-sm btn-outline-primary" (click)="review(event, 'confirm')" [disabled]="reviewing() || deleting() || event.status === 'confirmed'">확인</button>
-                  <button class="btn btn-sm btn-outline-danger" (click)="review(event, 'reject')" [disabled]="reviewing() || deleting() || event.status === 'rejected'">거부</button>
+                  <button class="btn btn-sm btn-outline-primary" (click)="review(event, 'confirm')" [disabled]="reviewing() || deleting() || event.status === 'confirmed'">Confirm</button>
+                  <button class="btn btn-sm btn-outline-danger" (click)="review(event, 'reject')" [disabled]="reviewing() || deleting() || event.status === 'rejected'">Reject</button>
                 }
-                @if (event.can_delete) {<button type="button" class="btn btn-sm btn-outline-danger" (click)="deleteEvent(event)" [disabled]="reviewing() || deleting()">삭제</button>}
+                @if (event.can_delete) {<button type="button" class="btn btn-sm btn-outline-danger" (click)="deleteEvent(event)" [disabled]="reviewing() || deleting()">Delete</button>}
               </div>
             </div>
           </article>
-        } @empty {<div class="event-empty">{{ events().length ? '조건에 맞는 이벤트가 없습니다. 필터를 변경해 주세요.' : '저장된 검색 후보가 없습니다. 분석 중 품질과 유사도 기준을 통과하면 표시됩니다.' }}</div>}
+        } @empty {<div class="event-empty">{{ events().length ? 'No matching events. Change the filters.' : 'No saved search candidates. Candidates appear when quality and similarity thresholds are met during analysis.' }}</div>}
       </div>
-      <small class="face-note">권한이 있는 최근 100건 안에서 필터링합니다. 등록 얼굴은 현재 사진이며 검출 당시의 등록 사진과 다를 수 있습니다. 검색 후보는 동일인 확정이 아닙니다.</small>
+      <small class="face-note">Filters the latest 100 events you can access. Reference images are current and may differ from those available when the event was detected. A search candidate does not confirm identity.</small>
     </section>
     <dialog #frameDialog class="event-frame-dialog" aria-labelledby="event-frame-title" (click)="frameBackdrop($event)" (cancel)="closeFrame()" (close)="frameClosed()">
       <div class="event-frame-content">
-        <div class="event-frame-heading"><h2 id="event-frame-title">검출 프레임</h2><button type="button" class="btn btn-outline-secondary" autofocus (click)="closeFrame()" aria-label="검출 프레임 닫기">닫기</button></div>
+        <div class="event-frame-heading"><h2 id="event-frame-title">Detected Frame</h2><button type="button" class="btn btn-outline-secondary" autofocus (click)="closeFrame()" aria-label="Close Detected Frame">Close</button></div>
         @if (frameEvent(); as event) {
-          <p class="event-frame-caption">{{ event.person_name }} · {{ event.camera_name }} · 추적 #{{ event.track_id }} · {{ event.timestamp | date:'yyyy-MM-dd HH:mm:ss' }}</p>
-          @if (frameLoading()) {<p class="event-frame-message" role="status">검출 프레임을 불러오고 있습니다.</p>}
-          @if (frameError()) {<p class="alert alert-warning" role="alert">검출 프레임을 불러오지 못했습니다. 이미지가 만료되었거나 접근 권한이 변경되었을 수 있습니다.</p>}
-          <img class="event-frame-image" [class.d-none]="frameLoading() || frameError()" [src]="event.frame_url" [alt]="event.person_name + ' 검색 이벤트 검출 프레임'" (load)="frameLoading.set(false)" (error)="frameError.set(true); frameLoading.set(false)">
+          <p class="event-frame-caption">{{ event.person_name }} · {{ event.camera_name }} · Track #{{ event.track_id }} · {{ event.timestamp | date:'yyyy-MM-dd HH:mm:ss' }}</p>
+          @if (frameLoading()) {<p class="event-frame-message" role="status">Loading the detected frame.</p>}
+          @if (frameError()) {<p class="alert alert-warning" role="alert">Could not load the detected frame. The image may have expired or access permissions may have changed.</p>}
+          <img class="event-frame-image" [class.d-none]="frameLoading() || frameError()" [src]="event.frame_url" [alt]="event.person_name + ' Search Event Detected Frame'" (load)="frameLoading.set(false)" (error)="frameError.set(true); frameLoading.set(false)">
         }
       </div>
     </dialog>`
@@ -260,7 +260,7 @@ export class EventPanelComponent implements OnInit, OnDestroy {
   filters = signal<EventFilters>({camera: 'selected', person: '', status: 'all'});
   visibleEvents = computed(() => filterEvents(this.events(), this.filters(), this.cameraId()));
   deletableEvents = computed(() => this.visibleEvents().filter(event => event.can_delete));
-  connection = signal('연결 중');
+  connection = signal('Connecting');
   error = signal('');
   reviewing = signal(false);
   deleting = signal(false);
@@ -298,10 +298,10 @@ export class EventPanelComponent implements OnInit, OnDestroy {
     const url = event.thumbnail_url ? `${event.thumbnail_url}?v=${event.change_id}` : null;
     return url && !this.failedImages().has(url) ? url : null;
   }
-  statusLabel(status: string) {return ({candidate:'확인 전 후보', confirmed:'운영자 확인', rejected:'운영자 거부'} as Record<string, string>)[status] || status;}
+  statusLabel(status: string) {return ({candidate:'Unconfirmed candidate', confirmed:'Confirmed by operator', rejected:'Rejected by operator'} as Record<string, string>)[status] || status;}
   deleteEvent(event: MatchEvent) {
     if (this.reviewing() || this.deleting() || !event.can_delete
-      || !window.confirm(`“${event.person_name}” 검색 이벤트와 검출 사진·영상 클립을 삭제할까요? 삭제 후 복구할 수 없습니다.`)) return;
+      || !window.confirm(`“${event.person_name}” Delete the search event, detected image and video clip? This cannot be undone.`)) return;
     this.deleting.set(true); this.error.set('');
     this.http.delete<EventDeletion>(`/api/events/${event.event_id}`, {headers:this.requestHeaders})
       .pipe(timeout(8000), takeUntilDestroyed(this.destroyRef)).subscribe({
@@ -312,7 +312,7 @@ export class EventPanelComponent implements OnInit, OnDestroy {
   deleteVisible() {
     const rows = this.deletableEvents();
     if (this.reviewing() || this.deleting() || !rows.length
-      || !window.confirm(`현재 필터에 표시된 삭제 가능 이벤트 ${rows.length}건과 검출 사진을 삭제할까요? 삭제 후 복구할 수 없습니다.`)) return;
+      || !window.confirm(`Delete ${rows.length} events matching the current filters and their detected images? This cannot be undone.`)) return;
     this.deleting.set(true); this.error.set('');
     this.http.post<{items: EventDeletion[]}>('/api/events/delete', {event_ids:rows.map(event => event.event_id)}, {headers:this.requestHeaders})
       .pipe(timeout(8000), takeUntilDestroyed(this.destroyRef)).subscribe({
@@ -323,7 +323,7 @@ export class EventPanelComponent implements OnInit, OnDestroy {
   private deleteFailed(error: {status?: number}) {
     this.deleting.set(false);
     if (error.status === 401) {this.feed.stop(); this.sessionExpired.emit();}
-    else {this.error.set('이벤트를 삭제하지 못했습니다. 접근 권한과 서버 연결을 확인해 주세요.'); void this.feed.sync(true);}
+    else {this.error.set('Could not delete the event. Check your access permissions and server connection.'); void this.feed.sync(true);}
   }
   review(event: MatchEvent, action: 'confirm' | 'reject') {
     if (this.reviewing() || this.deleting()) return;
@@ -334,7 +334,7 @@ export class EventPanelComponent implements OnInit, OnDestroy {
         error: error => {
           this.reviewing.set(false);
           if (error.status === 401) {this.feed.stop(); this.sessionExpired.emit();}
-          else {this.error.set('이벤트를 저장하지 못했습니다. 접근 권한과 서버 연결을 확인해 주세요.'); void this.feed.sync(true);}
+          else {this.error.set('Could not save the event. Check your access permissions and server connection.'); void this.feed.sync(true);}
         }
       });
   }

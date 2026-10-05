@@ -1,7 +1,7 @@
 import {expect, test, type WebSocketRoute} from '@playwright/test';
 import {mkdirSync, readFileSync} from 'node:fs';
 
-test('검색 이벤트 개별·필터 목록 삭제, 사진 제거, 다른 화면 갱신과 오프라인 삭제 복구', async ({page}) => {
+test('Event and filtered-list deletion with offline recovery', async ({page}) => {
   test.setTimeout(120000);
   const credentials = readFileSync('../data/local-admin.txt', 'utf8');
   const prefix = `EVENT-DELETE-E2E-${Date.now()}`;
@@ -20,10 +20,10 @@ test('검색 이벤트 개별·필터 목록 삭제, 사진 제거, 다른 화�
     serverSocket = socket.connectToServer();
   });
   await page.goto('/');
-  await page.getByLabel('아이디', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
-  await page.getByLabel('비밀번호', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
-  await page.getByRole('button', {name:'로그인', exact:true}).click();
-  await expect(page.getByRole('heading', {name:'시스템 준비 상태'})).toBeVisible();
+  await page.getByLabel('Username', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
+  await page.getByLabel('Password', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
+  await page.getByRole('button', {name:'Log In', exact:true}).click();
+  await expect(page.getByRole('heading', {name:'System Readiness'})).toBeVisible();
   const auth = await (await page.request.get('/api/auth/me')).json();
   headers = {'X-CSRF-Token':auth.csrf_token};
   try {
@@ -42,8 +42,8 @@ test('검색 이벤트 개별·필터 목록 삭제, 사진 제거, 다른 화�
     })).status()).toBe(200);
     const panel = page.locator('app-event-panel');
     await page.goto(`/#/live/${cameraId}`);
-    await expect(panel.getByRole('status')).toHaveText('연결됨', {timeout:15000});
-    await panel.getByLabel('인물 이름', {exact:true}).fill(prefix);
+    await expect(panel.getByRole('status')).toHaveText('Connected', {timeout:15000});
+    await panel.getByLabel('Person Name', {exact:true}).fill(prefix);
     const eventIds: number[] = [];
     for (let session = 0; session < 3; session++) {
       const started = await page.request.post(`/api/cameras/${cameraId}/start`, {
@@ -68,19 +68,19 @@ test('검색 이벤트 개별·필터 목록 삭제, 사진 제거, 다른 화�
     await expect(panel.locator('.event-card')).toHaveCount(3);
     await observer.goto(`/#/live/${cameraId}`);
     const observerPanel = observer.locator('app-event-panel');
-    await expect(observerPanel.getByRole('status')).toHaveText('연결됨', {timeout:15000});
-    await observerPanel.getByLabel('인물 이름', {exact:true}).fill(prefix);
+    await expect(observerPanel.getByRole('status')).toHaveText('Connected', {timeout:15000});
+    await observerPanel.getByLabel('Person Name', {exact:true}).fill(prefix);
     await expect(observerPanel.locator('.event-card')).toHaveCount(3);
 
     // Cancelling a deletion must leave both the record and photographs intact.
     page.once('dialog', dialog => dialog.dismiss());
-    await card(singleId).getByRole('button', {name:'삭제', exact:true}).click();
+    await card(singleId).getByRole('button', {name:'Delete', exact:true}).click();
     await expect(card(singleId)).toHaveCount(1);
     expect((await page.request.get(`/api/events/${singleId}/face`)).status()).toBe(200);
     page.once('dialog', async dialog => {
-      expect(dialog.message()).toContain('검출 사진'); await dialog.accept();
+      expect(dialog.message()).toContain('detected image'); await dialog.accept();
     });
-    await card(singleId).getByRole('button', {name:'삭제', exact:true}).click();
+    await card(singleId).getByRole('button', {name:'Delete', exact:true}).click();
     await expect(card(singleId)).toHaveCount(0);
     await expect(observerPanel.locator(`.event-card[data-event-id="${singleId}"]`)).toHaveCount(0);
     for (const path of [`/api/events/${singleId}`, `/api/events/${singleId}/face`, `/api/events/${singleId}/frame`]) {
@@ -89,28 +89,28 @@ test('검색 이벤트 개별·필터 목록 삭제, 사진 제거, 다른 화�
 
     // The bulk action deletes only the current filter, leaving another status intact.
     expect((await page.request.post(`/api/events/${offlineId}/confirm`, {headers})).status()).toBe(200);
-    await expect(card(offlineId).locator('.event-status')).toHaveText('운영자 확인');
-    await panel.getByLabel('이벤트 상태', {exact:true}).selectOption('candidate');
+    await expect(card(offlineId).locator('.event-status')).toHaveText('Confirmed by operator');
+    await panel.getByLabel('Event Status', {exact:true}).selectOption('candidate');
     await expect(panel.locator('.event-card')).toHaveCount(1);
     await page.setViewportSize({width:390, height:844});
-    await panel.getByRole('button', {name:'목록 삭제', exact:true}).scrollIntoViewIfNeeded();
+    await panel.getByRole('button', {name:'Delete List', exact:true}).scrollIntoViewIfNeeded();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     mkdirSync('../data/screenshots', {recursive:true});
     await panel.screenshot({path:'../data/screenshots/event-deletion-mobile.png'});
     page.once('dialog', async dialog => {
-      expect(dialog.message()).toContain('1건'); await dialog.accept();
+      expect(dialog.message()).toContain('1records'); await dialog.accept();
     });
-    await panel.getByRole('button', {name:'목록 삭제', exact:true}).click();
+    await panel.getByRole('button', {name:'Delete List', exact:true}).click();
     await expect(card(bulkId)).toHaveCount(0);
     expect((await page.request.get(`/api/events/${bulkId}`)).status()).toBe(404);
     expect((await page.request.get(`/api/events/${offlineId}`)).status()).toBe(200);
-    await panel.getByLabel('이벤트 상태', {exact:true}).selectOption('all');
+    await panel.getByLabel('Event Status', {exact:true}).selectOption('all');
     await expect(card(offlineId)).toHaveCount(1);
 
     paused = true;
     await browserSocket!.close({code:1013});
     await serverSocket!.close({code:1013});
-    await expect(panel.getByRole('status')).toHaveText('재연결 대기');
+    await expect(panel.getByRole('status')).toHaveText('Waiting to reconnect');
     const deletion = await page.request.delete(`/api/events/${offlineId}`, {headers});
     expect(deletion.status()).toBe(200);
     const deletedChange = (await deletion.json()).change_id;
@@ -124,11 +124,11 @@ test('검색 이벤트 개별·필터 목록 삭제, 사진 제거, 다른 화�
     }, {timeout:20000});
     paused = false;
     await recovered;
-    await expect(panel.getByRole('status')).toHaveText('연결됨');
+    await expect(panel.getByRole('status')).toHaveText('Connected');
     await expect(panel.locator('.event-card')).toHaveCount(0);
     await page.reload();
-    await expect(panel.getByRole('status')).toHaveText('연결됨', {timeout:15000});
-    await panel.getByLabel('인물 이름', {exact:true}).fill(prefix);
+    await expect(panel.getByRole('status')).toHaveText('Connected', {timeout:15000});
+    await panel.getByLabel('Person Name', {exact:true}).fill(prefix);
     await expect(panel.locator('.event-card')).toHaveCount(0);
     expect(errors).toEqual([]);
   } finally {

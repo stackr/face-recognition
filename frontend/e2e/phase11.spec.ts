@@ -1,16 +1,16 @@
 import {expect, test} from '@playwright/test';
 import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 
-test('Phase 11 선택 외형 분석 상태, 특징 메타데이터와 중지 후 제거', async ({page}) => {
+test('Appearance analysis metadata and cleanup after stopping', async ({page}) => {
   test.setTimeout(60000);
   const credentials = readFileSync('../data/local-admin.txt', 'utf8');
   let cameraId: number | undefined;
   let headers: Record<string,string> = {};
   await page.goto('/');
-  await page.getByLabel('아이디', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
-  await page.getByLabel('비밀번호', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
-  await page.getByRole('button', {name:'로그인', exact:true}).click();
-  await expect(page.getByRole('heading', {name:'시스템 준비 상태'})).toBeVisible();
+  await page.getByLabel('Username', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
+  await page.getByLabel('Password', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
+  await page.getByRole('button', {name:'Log In', exact:true}).click();
+  await expect(page.getByRole('heading', {name:'System Readiness'})).toBeVisible();
   headers = {'X-CSRF-Token':(await (await page.request.get('/api/auth/me')).json()).csrf_token};
   const system = await (await page.request.get('/api/system/status')).json();
   const mode = system.worker.person_reid.status;
@@ -28,7 +28,7 @@ test('Phase 11 선택 외형 분석 상태, 특징 메타데이터와 중지 후
     }, {timeout:20000}).toBeGreaterThan(1);
     if (mode === 'ready') {
       expect(system.worker.person_reid.actual_device).toBe('cuda:0');
-      await expect(page.getByText('외형 특징 준비 · 인물 확인 전').first()).toBeVisible();
+      await expect(page.getByText('Appearance features ready · Identity unconfirmed').first()).toBeVisible();
       const ready = status.result.tracks.filter((track:any) => track.reid?.embedding_ready);
       expect(ready.length).toBeGreaterThan(0);
       for (const track of ready) {
@@ -40,7 +40,7 @@ test('Phase 11 선택 외형 분석 상태, 특징 메타데이터와 중지 후
       await page.locator('.faces-panel').screenshot({path:'../data/screenshots/phase11-body-ready.png'});
     } else {
       expect(status.reid_cache_tracks).toBe(0);
-      await expect(page.getByText('외형 특징 준비 · 인물 확인 전')).toHaveCount(0);
+      await expect(page.getByText('Appearance features ready · Identity unconfirmed')).toHaveCount(0);
     }
     const stopped = await (await page.request.post(`/api/cameras/${cameraId}/stop`, {headers})).json();
     expect(stopped.reid_cache_tracks).toBe(0);

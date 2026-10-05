@@ -3,7 +3,7 @@ import {mkdirSync, readFileSync} from 'node:fs';
 
 test.use({actionTimeout:10000, navigationTimeout:20000});
 
-test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사진 비교·로그', async ({page, request}) => {
+test('Detection and comparison settings, live analysis, photo comparison and logs', async ({page, request}) => {
   test.setTimeout(120000);
   const credentials = readFileSync('../data/local-admin.txt', 'utf8');
   const prefix = `RECOGNITION-E2E-${Date.now()}`;
@@ -16,10 +16,10 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
   page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({width: 1600, height: 1000});
   await page.goto('/');
-  await page.getByLabel('아이디', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
-  await page.getByLabel('비밀번호', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
-  await page.getByRole('button', {name:'로그인', exact:true}).click();
-  await expect(page.getByRole('heading', {name:'시스템 준비 상태'})).toBeVisible();
+  await page.getByLabel('Username', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
+  await page.getByLabel('Password', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
+  await page.getByRole('button', {name:'Log In', exact:true}).click();
+  await expect(page.getByRole('heading', {name:'System Readiness'})).toBeVisible();
   const auth = await (await page.request.get('/api/auth/me')).json();
   headers = {'X-CSRF-Token': auth.csrf_token};
   try {
@@ -38,32 +38,32 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
     expect((await page.request.post(`/api/cameras/${cameraId}/start`, {headers, data:{source_type:'mp4', loop:true}})).status()).toBe(200);
     await expect.poll(async () => (await (await page.request.get(`/api/cameras/${cameraId}/status`)).json()).state).toBe('running');
     const before = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
-    await page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button', {name:'기능 설정'}).click();
-    await expect(page.getByRole('heading', {name:'기능 설정', exact:true})).toBeVisible();
-    await page.getByLabel('사람 검출 · 모든 프레임 검사', {exact:true}).uncheck();
-    await page.getByLabel('얼굴 검출 · 모든 프레임 검사', {exact:true}).uncheck();
-    await page.getByLabel('얼굴 검출 빈도 (FPS)', {exact:true}).fill('0');
-    await expect(page.getByRole('button', {name:'설정 저장', exact:true})).toBeDisabled();
-    await page.getByLabel('얼굴 검출 빈도 (FPS)', {exact:true}).fill('5');
-    await page.getByLabel('사람 검출 빈도 (FPS)', {exact:true}).fill('8');
-    await page.getByLabel('프레임당 최대 얼굴 검사 인원', {exact:true}).fill('6');
-    const personThreshold = page.getByLabel('사람 검출 기준 점수', {exact:true});
+    await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button', {name:'Feature Settings'}).click();
+    await expect(page.getByRole('heading', {name:'Feature Settings', exact:true})).toBeVisible();
+    await page.getByLabel('Person Detection · Process Every Frame', {exact:true}).uncheck();
+    await page.getByLabel('Face Detection · Process Every Frame', {exact:true}).uncheck();
+    await page.getByLabel('Face Detection Rate (FPS)', {exact:true}).fill('0');
+    await expect(page.getByRole('button', {name:'Save Settings', exact:true})).toBeDisabled();
+    await page.getByLabel('Face Detection Rate (FPS)', {exact:true}).fill('5');
+    await page.getByLabel('Person Detection Rate (FPS)', {exact:true}).fill('8');
+    await page.getByLabel('Maximum Faces Analyzed per Frame', {exact:true}).fill('6');
+    const personThreshold = page.getByLabel('Person Detection Confidence Threshold', {exact:true});
     await expect(personThreshold).toHaveValue(String(original.values.detection_confidence));
     for (const invalid of ['', '-0.01', '1.01']) {
       await personThreshold.fill(invalid);
-      await expect(page.getByRole('button', {name:'설정 저장', exact:true})).toBeDisabled();
+      await expect(page.getByRole('button', {name:'Save Settings', exact:true})).toBeDisabled();
     }
     await personThreshold.fill('0.2');
-    await page.getByLabel('비교점수 기준', {exact:true}).fill('1.01');
-    await expect(page.getByRole('button', {name:'설정 저장', exact:true})).toBeDisabled();
-    await page.getByLabel('비교점수 기준', {exact:true}).fill('-1.01');
-    await expect(page.getByRole('button', {name:'설정 저장', exact:true})).toBeDisabled();
-    await page.getByLabel('비교점수 기준', {exact:true}).fill('0.7');
+    await page.getByLabel('Similarity Threshold', {exact:true}).fill('1.01');
+    await expect(page.getByRole('button', {name:'Save Settings', exact:true})).toBeDisabled();
+    await page.getByLabel('Similarity Threshold', {exact:true}).fill('-1.01');
+    await expect(page.getByRole('button', {name:'Save Settings', exact:true})).toBeDisabled();
+    await page.getByLabel('Similarity Threshold', {exact:true}).fill('0.7');
     const saveResponse = page.waitForResponse(response => response.url().endsWith('/api/function-settings') && response.request().method() === 'PUT');
-    await page.getByRole('button', {name:'설정 저장', exact:true}).click();
+    await page.getByRole('button', {name:'Save Settings', exact:true}).click();
     ownedRevision = (await (await saveResponse).json()).revision;
-    await expect(page.locator('app-function-settings').getByRole('status')).toContainText('설정을 저장');
-    await expect(page.locator('.settings-state')).toContainText('반영 완료');
+    await expect(page.locator('app-function-settings').getByRole('status')).toContainText('Settings saved');
+    await expect.poll(async () => (await (await page.request.get('/api/function-settings')).json()).applied).toBe(true);
     const configured = await (await page.request.get('/api/function-settings')).json();
     expect(configured.values).toEqual({...originalValues, detection_fps:8, face_detection_fps:5, person_all_frames:false, face_all_frames:false, face_rois_per_frame:6, face_match_threshold:0.7, detection_confidence:0.2});
     expect(configured.applied).toBe(true);
@@ -88,11 +88,11 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
 
     // Raising the criterion removes current candidates without removing history or
     // restarting the stream. The photo comparison must report the same criterion.
-    await page.getByLabel('비교점수 기준', {exact:true}).fill('1');
+    await page.getByLabel('Similarity Threshold', {exact:true}).fill('1');
     const strictSave = page.waitForResponse(response => response.url().endsWith('/api/function-settings') && response.request().method() === 'PUT');
-    await page.getByRole('button', {name:'설정 저장', exact:true}).click();
+    await page.getByRole('button', {name:'Save Settings', exact:true}).click();
     ownedRevision = (await (await strictSave).json()).revision;
-    await expect(page.locator('.settings-state')).toContainText('비교점수 기준 1.00');
+    await expect(page.getByLabel('Similarity Threshold', {exact:true})).toHaveValue('1');
     await expect.poll(async () => {
       const state = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
       const tracks = state.result?.tracks ?? [];
@@ -103,7 +103,7 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
     }).toBe(true);
     expect((await page.request.get(`/api/events/${eventId}`)).status()).toBe(200);
     await page.reload();
-    await expect(page.getByLabel('비교점수 기준', {exact:true})).toHaveValue('1');
+    await expect(page.getByLabel('Similarity Threshold', {exact:true})).toHaveValue('1');
     await expect(personThreshold).toHaveValue('0.2');
     await page.setViewportSize({width:390, height:844});
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -111,22 +111,22 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
     await page.setViewportSize({width:1600, height:1000});
     await page.goto(`/#/persons/${personId}/edit`);
     const strictPhoto = page.waitForResponse(response => response.url().endsWith('/api/persons/search') && response.request().method() === 'POST');
-    await page.getByLabel('비교할 사진', {exact:true}).setInputFiles('../data/calibration/person_b_variant.jpg');
+    await page.getByLabel('Photo to Compare', {exact:true}).setInputFiles('../data/calibration/person_b_variant.jpg');
     // Chrome may evict Blob-upload response bodies from DevTools. Verify the real
     // response as rendered by Angular without replacing the request or result.
     expect((await strictPhoto).status()).toBe(200);
     const strictRow = page.locator('.comparison-results').getByRole('row').filter({hasText:prefix});
-    await expect(page.getByText('시험 임계값 1.00 · 인물별 등록 얼굴 중 최대 유사도', {exact:true})).toBeVisible();
-    await expect(strictRow).toContainText('임계값 미달');
+    await expect(page.getByText('Test threshold 1.00 · Highest similarity across the registered faces of each person', {exact:true})).toBeVisible();
+    await expect(strictRow).toContainText('Below threshold');
     expect(Number(await strictRow.getByRole('cell').nth(1).textContent())).toBeLessThan(1);
 
-    await page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button', {name:'기능 설정'}).click();
-    await expect(page.getByLabel('비교점수 기준', {exact:true})).toHaveValue('1');
-    await page.getByLabel('비교점수 기준', {exact:true}).fill('0.7');
+    await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button', {name:'Feature Settings'}).click();
+    await expect(page.getByLabel('Similarity Threshold', {exact:true})).toHaveValue('1');
+    await page.getByLabel('Similarity Threshold', {exact:true}).fill('0.7');
     const relaxedSave = page.waitForResponse(response => response.url().endsWith('/api/function-settings') && response.request().method() === 'PUT');
-    await page.getByRole('button', {name:'설정 저장', exact:true}).click();
+    await page.getByRole('button', {name:'Save Settings', exact:true}).click();
     ownedRevision = (await (await relaxedSave).json()).revision;
-    await expect(page.locator('.settings-state')).toContainText('비교점수 기준 0.70');
+    await expect(page.getByLabel('Similarity Threshold', {exact:true})).toHaveValue('0.7');
     await expect.poll(async () => {
       const state = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
       return state.stream_session_id === before.stream_session_id && state.result?.tracks.some(
@@ -135,50 +135,49 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
     }).toBe(true);
     await page.goto(`/#/persons/${personId}/edit`);
     const relaxedPhoto = page.waitForResponse(response => response.url().endsWith('/api/persons/search') && response.request().method() === 'POST');
-    await page.getByLabel('비교할 사진', {exact:true}).setInputFiles('../data/calibration/person_b_variant.jpg');
+    await page.getByLabel('Photo to Compare', {exact:true}).setInputFiles('../data/calibration/person_b_variant.jpg');
     expect((await relaxedPhoto).status()).toBe(200);
-    await expect(page.getByText('시험 임계값 0.70 · 인물별 등록 얼굴 중 최대 유사도', {exact:true})).toBeVisible();
-    await expect(page.locator('.comparison-results').getByRole('row').filter({hasText:prefix})).toContainText('유사도 후보');
-    await page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button', {name:'로그'}).click();
-    await expect(page.getByRole('heading', {name:'로그', exact:true})).toBeVisible();
-    await page.getByLabel('최신 페이지 자동 갱신 (5초)', {exact:true}).uncheck();
-    await page.getByLabel('로그 카메라', {exact:true}).selectOption(String(cameraId));
-    await page.getByLabel('검사 결과', {exact:true}).selectOption('matched');
-    await page.getByRole('button', {name:'조회', exact:true}).click();
-    await expect(page.locator('.recognition-log-table tbody tr').first()).toContainText('유사도 후보');
+    await expect(page.getByText('Test threshold 0.70 · Highest similarity across the registered faces of each person', {exact:true})).toBeVisible();
+    await expect(page.locator('.comparison-results').getByRole('row').filter({hasText:prefix})).toContainText('Similarity candidate');
+    await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button', {name:'Logs'}).click();
+    await expect(page.getByRole('heading', {name:'Logs', exact:true})).toBeVisible();
+    await page.getByLabel('Auto-refresh Latest Page (5 seconds)', {exact:true}).uncheck();
+    await page.getByLabel('Log Camera', {exact:true}).selectOption(String(cameraId));
+    await page.getByLabel('Analysis Result', {exact:true}).selectOption('matched');
+    await page.getByRole('button', {name:'View', exact:true}).click();
+    await expect(page.locator('.recognition-log-table tbody tr').first()).toContainText('Similarity candidate');
     const logs = await (await page.request.get(`/api/recognition-logs?camera_id=${cameraId}&outcome=matched`)).json();
     expect(logs.items.length).toBeGreaterThan(0);
     expect(logs.items.every((item:{sample_count:number; settings_revision:number; metrics:{detector_input:number}}) => item.sample_count >= 2 && [320,640].includes(item.metrics.detector_input))).toBe(true);
     expect((await request.get('/api/recognition-logs')).status()).toBe(401);
-    await page.locator('.recognition-log-table tbody tr').first().getByText('상세', {exact:true}).click();
-    await expect(page.locator('.recognition-log-table tbody tr').first()).toContainText('설정 버전');
+    await page.locator('.recognition-log-table tbody tr').first().getByText('Details', {exact:true}).click();
+    await expect(page.locator('.recognition-log-table tbody tr').first()).toContainText('Settings Revision');
     await page.locator('app-recognition-logs').screenshot({path:'../data/screenshots/recognition-logs-desktop.png'});
-    await page.getByLabel('검사 결과', {exact:true}).selectOption('quality_rejected');
-    await page.getByRole('button', {name:'조회', exact:true}).click();
+    await page.getByLabel('Analysis Result', {exact:true}).selectOption('quality_rejected');
+    await page.getByRole('button', {name:'View', exact:true}).click();
     // Uploaded face mode uses the face-test alignment rules without the person-mode quality gate.
     await expect(page.locator('.recognition-log-table tbody')).toContainText(
       originalValues.person_detection_enabled === false
-        ? '조건에 맞는 얼굴 검사 로그가 없습니다.'
-        : '품질 기준 미달'
+        ? 'No face analysis logs match the filters.'
+        : 'Below quality threshold'
     );
     await page.reload();
-    await expect(page.getByRole('heading', {name:'로그', exact:true})).toBeVisible();
-    await page.getByLabel('로그 카메라', {exact:true}).selectOption(String(cameraId));
-    await page.getByRole('button', {name:'조회', exact:true}).click();
+    await expect(page.getByRole('heading', {name:'Logs', exact:true})).toBeVisible();
+    await page.getByLabel('Log Camera', {exact:true}).selectOption(String(cameraId));
+    await page.getByRole('button', {name:'View', exact:true}).click();
     await page.setViewportSize({width:390, height:844});
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.screenshot({path:'../data/screenshots/recognition-logs-mobile.png'});
-    const menu = await page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button').allTextContents();
-    expect(menu.at(-2)).toContain('인물 관리');
-    expect(menu.at(-1)).toContain('얼굴 검출 테스트');
+    const menu = await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button').allTextContents();
+    expect(menu.at(-1)).toContain('People');
 
     await page.setViewportSize({width:1600, height:1000});
-    await page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button', {name:'기능 설정'}).click();
+    await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button', {name:'Feature Settings'}).click();
     await personThreshold.fill('1');
     const cutoffSave = page.waitForResponse(response => response.url().endsWith('/api/function-settings') && response.request().method() === 'PUT');
-    await page.getByRole('button', {name:'설정 저장', exact:true}).click();
+    await page.getByRole('button', {name:'Save Settings', exact:true}).click();
     ownedRevision = (await (await cutoffSave).json()).revision;
-    await expect(page.locator('.settings-state')).toContainText('사람 검출 기준 1.00');
+    await expect(page.getByLabel('Person Detection Confidence Threshold', {exact:true})).toHaveValue('1');
     await expect.poll(async () => {
       const state = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
       return state.state === 'running' && state.stream_session_id === before.stream_session_id
@@ -188,19 +187,19 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
           : state.result.tracks.length === 0);
     }).toBe(true);
     expect((await page.request.get(`/api/events/${eventId}`)).status()).toBe(200);
-    await page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button', {name:'Live Search'}).click();
-    await page.getByLabel('카메라', {exact:true}).selectOption({label:prefix});
-    await page.getByText('상세 분석 지표', {exact:true}).click();
+    await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button', {name:'Live Search'}).click();
+    await page.getByLabel('Camera', {exact:true}).selectOption({label:prefix});
+    await page.getByText('Detailed Analysis Metrics', {exact:true}).click();
     const faceOnly = originalValues.person_detection_enabled === false;
     await expect(page.locator('.live-detection-confidence')).toHaveText(
       faceOnly ? Number(originalValues.video_face_detection_threshold).toFixed(2) : '1.00'
     );
-    await expect(page.locator('.metrics-card')).toContainText(faceOnly ? '얼굴 수' : '0명');
+    await expect(page.locator('.metrics-card')).toContainText(faceOnly ? 'Faces' : '0 people');
     await page.screenshot({path:'../data/screenshots/person-confidence-live.png'});
-    await page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button', {name:'기능 설정'}).click();
+    await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button', {name:'Feature Settings'}).click();
     await personThreshold.fill('0.2');
     const cutoffRestore = page.waitForResponse(response => response.url().endsWith('/api/function-settings') && response.request().method() === 'PUT');
-    await page.getByRole('button', {name:'설정 저장', exact:true}).click();
+    await page.getByRole('button', {name:'Save Settings', exact:true}).click();
     ownedRevision = (await (await cutoffRestore).json()).revision;
     await expect.poll(async () => {
       const state = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();

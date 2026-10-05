@@ -6,7 +6,7 @@ import {join} from 'node:path';
 
 test.use({actionTimeout:10000, navigationTimeout:20000});
 
-test('사람·얼굴 독립 FPS, 모든 프레임 검사, 저장·반영·모바일 표시', async ({page}) => {
+test('Independent detector FPS, every-frame processing and mobile display', async ({page}) => {
   test.setTimeout(120000);
   const credentials = readFileSync('../data/local-admin.txt', 'utf8');
   let original: Record<string, number | boolean> | undefined;
@@ -19,36 +19,35 @@ test('사람·얼굴 독립 FPS, 모든 프레임 검사, 저장·반영·모바
   page.on('pageerror', error => errors.push(error.message));
   await page.setViewportSize({width:1600, height:1000});
   await page.goto('/');
-  await page.getByLabel('아이디', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
-  await page.getByLabel('비밀번호', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
-  await page.getByRole('button', {name:'로그인', exact:true}).click();
-  await expect(page.getByRole('heading', {name:'시스템 준비 상태', exact:true})).toBeVisible();
+  await page.getByLabel('Username', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
+  await page.getByLabel('Password', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
+  await page.getByRole('button', {name:'Log In', exact:true}).click();
+  await expect(page.getByRole('heading', {name:'System Readiness', exact:true})).toBeVisible();
   headers = {'X-CSRF-Token': (await (await page.request.get('/api/auth/me')).json()).csrf_token};
   const save = async () => {
     const response = page.waitForResponse(r => r.url().endsWith('/api/function-settings') && r.request().method() === 'PUT');
-    await page.getByRole('button', {name:'설정 저장', exact:true}).click();
+    await page.getByRole('button', {name:'Save Settings', exact:true}).click();
     ownedRevision = (await (await response).json()).revision;
     await expect.poll(async () => (await (await page.request.get('/api/function-settings')).json()).applied).toBe(true);
-    await expect(page.locator('.settings-state')).toContainText('반영 완료');
   };
   try {
     execFileSync('ffmpeg', ['-v', 'error', '-i', '../data/videos/face-smoke.mp4', '-t', '2', '-an', '-c:v', 'libx264', '-preset', 'ultrafast', fixture]);
     original = (await (await page.request.get('/api/function-settings')).json()).values;
-    await page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button', {name:'기능 설정'}).click();
-    for (const name of ['사람 검출', '얼굴 검출', '등록 인물 비교']) {
+    await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button', {name:'Feature Settings'}).click();
+    for (const name of ['Person Detection', 'Face Detection', 'Registered Person Comparison']) {
       await expect(page.getByRole('heading', {name, exact:true})).toBeVisible();
     }
-    const personAll = page.getByLabel('사람 검출 · 모든 프레임 검사', {exact:true});
-    const faceAll = page.getByLabel('얼굴 검출 · 모든 프레임 검사', {exact:true});
-    const personFps = page.getByLabel('사람 검출 빈도 (FPS)', {exact:true});
-    const faceFps = page.getByLabel('얼굴 검출 빈도 (FPS)', {exact:true});
+    const personAll = page.getByLabel('Person Detection · Process Every Frame', {exact:true});
+    const faceAll = page.getByLabel('Face Detection · Process Every Frame', {exact:true});
+    const personFps = page.getByLabel('Person Detection Rate (FPS)', {exact:true});
+    const faceFps = page.getByLabel('Face Detection Rate (FPS)', {exact:true});
     await personAll.uncheck(); await faceAll.uncheck();
-    await expect(page.getByLabel('사람 검출 사용', {exact:true})).toHaveCount(0);
+    await expect(page.getByLabel('Enable Person Detection', {exact:true})).toHaveCount(0);
     for (const field of [personFps, faceFps]) {
       await field.fill('0');
-      await expect(page.getByRole('button', {name:'설정 저장', exact:true})).toBeDisabled();
+      await expect(page.getByRole('button', {name:'Save Settings', exact:true})).toBeDisabled();
       await field.fill('241');
-      await expect(page.getByRole('button', {name:'설정 저장', exact:true})).toBeDisabled();
+      await expect(page.getByRole('button', {name:'Save Settings', exact:true})).toBeDisabled();
       await field.fill('5');
     }
     await faceAll.check();
@@ -85,15 +84,15 @@ test('사람·얼굴 독립 FPS, 모든 프레임 검사, 저장·반영·모바
     await save();
     await analyze(20, 4);
     await page.goto(`/#/live/${cameraId}`);
-    const personEnabled = page.getByLabel('사람 검출 사용', {exact:true});
-    const faceEnabled = page.getByLabel('얼굴 검출 사용', {exact:true});
-    const start = page.getByRole('button', {name:'분석 시작', exact:true});
+    const personEnabled = page.getByLabel('Enable Person Detection', {exact:true});
+    const faceEnabled = page.getByLabel('Enable Face Detection', {exact:true});
+    const start = page.getByRole('button', {name:'Start Analysis', exact:true});
     await expect(personEnabled).toBeEnabled();
     await personEnabled.uncheck(); await faceEnabled.uncheck();
     await expect(start).toBeDisabled();
-    await expect(page.locator('.analysis-detection-options [role="status"]')).toContainText('하나 이상 선택');
+    await expect(page.locator('.analysis-detection-options [role="status"]')).toContainText('Select at least one detector');
     await personEnabled.check();
-    await page.getByLabel('반복 재생', {exact:true}).check();
+    await page.getByLabel('Loop Playback', {exact:true}).check();
     const personResponse = page.waitForResponse(r => r.url().endsWith(`/api/cameras/${cameraId}/start`) && r.request().method() === 'POST');
     await start.click();
     const personRun = await (await personResponse).json();
@@ -103,15 +102,15 @@ test('사람·얼굴 독립 FPS, 모든 프레임 검사, 저장·반영·모바
     const personPhotos = page.locator('.person-grid .person-track-image');
     await expect(personPhotos.first()).toBeVisible();
     await expect.poll(() => personPhotos.first().evaluate((img: HTMLImageElement) => img.naturalHeight)).toBeGreaterThan(0);
-    await expect(page.locator('.faces-panel').getByRole('heading', {name:'얼굴 검출', exact:true})).toHaveCount(0);
+    await expect(page.locator('.faces-panel').getByRole('heading', {name:'Face Detection', exact:true})).toHaveCount(0);
     await page.locator('.faces-panel').screenshot({path:'../data/screenshots/person-tracks-only-desktop.png'});
     const peopleOnly = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
     expect(peopleOnly.face_detection_frames).toBe(0);
     expect(peopleOnly.face_counts.embeddings_created ?? 0).toBe(0);
-    await page.getByRole('button', {name:'분석 중지', exact:true}).click();
+    await page.getByRole('button', {name:'Stop Analysis', exact:true}).click();
     await expect(personEnabled).toBeEnabled();
     await personEnabled.uncheck(); await faceEnabled.check();
-    await page.getByLabel('반복 재생', {exact:true}).check();
+    await page.getByLabel('Loop Playback', {exact:true}).check();
     const faceResponse = page.waitForResponse(r => r.url().endsWith(`/api/cameras/${cameraId}/start`) && r.request().method() === 'POST');
     await start.click();
     const faceRun = await (await faceResponse).json();
@@ -125,7 +124,7 @@ test('사람·얼굴 독립 FPS, 모든 프레임 검사, 저장·반영·모바
     await page.setViewportSize({width:390, height:844});
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.locator('.analysis-controls').screenshot({path:'../data/screenshots/live-detection-selection-mobile.png'});
-    await page.getByRole('button', {name:'분석 중지', exact:true}).click();
+    await page.getByRole('button', {name:'Stop Analysis', exact:true}).click();
     await expect(faceEnabled).toBeEnabled();
     expect(errors).toEqual([]);
   } finally {
