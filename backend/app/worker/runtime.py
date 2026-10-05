@@ -872,7 +872,7 @@ class WorkerRuntime:
                 is_face = direct and any(track is face_track for face_track in tracks)
                 x1, y1, x2, y2 = map(int, track["bbox"])
                 cv2.rectangle(
-                    annotated, (x1, y1), (x2, y2), (100, 220, 255) if is_face else (80, 230, 120), 2
+                    annotated, (x1, y1), (x2, y2), (100, 220, 255) if is_face else (80, 230, 120), 1
                 )
                 cv2.putText(
                     annotated,
@@ -881,13 +881,13 @@ class WorkerRuntime:
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
                     (100, 220, 255) if is_face else (80, 230, 120),
-                    2,
+                    1,
                 )
                 face = track.get("face", {})
                 if face.get("bbox") and face.get("frame_id") == frame.frame_id:
                     fx1, fy1, fx2, fy2 = map(int, face["bbox"])
                     color = (100, 220, 255) if face["status"] == "accepted" else (100, 130, 220)
-                    cv2.rectangle(annotated, (fx1, fy1), (fx2, fy2), color, 2)
+                    cv2.rectangle(annotated, (fx1, fy1), (fx2, fy2), color, 1)
                     for px, py in face.get("landmarks", []):
                         cv2.circle(annotated, (round(px), round(py)), 2, color, -1)
             label = f"cam {run.camera_id} | {frame.stream_session_id[:8]} | frame {frame.frame_id} | {frame.captured_at}"
