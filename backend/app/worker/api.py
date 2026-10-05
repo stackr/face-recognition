@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from app.core.config import Settings
 from app.schemas.face_tests import DEFAULT_MIN_FACE_SIZE, FaceTestOptions
+from app.schemas.recognition import face_interval
 from app.worker.runtime import WorkerRuntime
 
 
@@ -78,7 +79,7 @@ def create_worker(
                     setattr(settings, name, value)
                 if active_faces:
                     active_faces.info.setdefault("quality", {}).update(
-                        interval_seconds=values.face_analysis_interval,
+                        interval_seconds=face_interval(values),
                         max_rois_per_frame=values.face_rois_per_frame,
                     )
         except Exception as exc:

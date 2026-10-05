@@ -10,7 +10,7 @@ from app.api.dependencies import admin_user, current_user
 from app.db.session import get_db
 from app.models import AuditLog, Camera, CameraPermission, FunctionSettings, RecognitionLog, User
 from app.models.foundation import utc_now
-from app.schemas.recognition import SamplingSettings, SamplingUpdate, sample_window
+from app.schemas.recognition import SamplingSettings, SamplingUpdate, face_interval, sample_window
 from app.services.recognition import load_sampling
 
 router = APIRouter(tags=["Recognition controls"])
@@ -47,7 +47,7 @@ def settings_output(request, revision, values):
             "retry_detector_size": 640,
             "sample_count": request.app.state.settings.face_sample_count,
             "sample_window_seconds": sample_window(
-                request.app.state.settings, values.face_analysis_interval
+                request.app.state.settings, face_interval(values)
             ),
             "minimum_samples": 2,
             "person_track_start_threshold": request.app.state.settings.new_track_threshold,
@@ -76,9 +76,15 @@ def update_settings(
         if payload.revision != (row.revision if row else 0):
             raise HTTPException(409, "Settings changed; reload before saving")
         _, current = load_sampling(db, request.app.state.settings)
-        values = SamplingSettings.model_validate(
-            current.model_dump() | payload.model_dump(exclude={"revision"}, exclude_unset=True)
+        updated = current.model_dump() | payload.model_dump(
+            exclude={"revision"}, exclude_unset=True
         )
+        if (
+            "face_analysis_interval" in payload.model_fields_set
+            and "face_detection_fps" not in payload.model_fields_set
+        ):
+            updated.pop("face_detection_fps", None)
+        values = SamplingSettings.model_validate(updated)
         if row is None:
             row = FunctionSettings(id=1, revision=0, values={})
             db.add(row)

@@ -60,7 +60,7 @@ test('업로드 MP4 얼굴 직접 검출, 등록 인물 이벤트, 기준 변경
     await size.fill('32.5');
     await expect(page.getByRole('button', {name:'설정 저장', exact:true})).toBeDisabled();
     await size.fill('32');
-    await page.getByLabel('얼굴 검사 간격 (초)', {exact:true}).fill('0.2');
+    await page.getByLabel('얼굴 검출 빈도 (FPS)', {exact:true}).fill('5');
     await page.getByLabel('사람 검출 빈도 (FPS)', {exact:true}).fill('5');
     await page.getByLabel('비교점수 기준', {exact:true}).fill('0.7');
     await save();

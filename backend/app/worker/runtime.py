@@ -12,6 +12,7 @@ from queue import Empty, Full, Queue
 import cv2
 import numpy as np
 
+from app.schemas.recognition import face_interval
 from app.worker.faces import TrackFaces
 from app.worker.reconnect import reconnect_delay
 from app.worker.tracker import CameraTracker
@@ -26,6 +27,7 @@ class Frame:
     frame_id: int
     captured_at: str
     captured_mono: float
+    video_seconds: float | None = None
 
 
 class CameraRun:
@@ -50,6 +52,9 @@ class CameraRun:
         self.created_mono = time.monotonic()
         self.ended_mono = None
         self.next_due = 0
+        self.person_due = self.face_due = None
+        self.completed_frame_id = 0
+        self.person_frames = self.face_detection_frames = 0
         self.captured = self.processed = self.dropped = 0
         self.loops = 0
         self.connection_attempts = self.reconnects = self.consecutive_failures = 0
@@ -101,8 +106,10 @@ class CameraRun:
         self.latest = self.jpeg = self.result = self.tracker = self.faces = self.reid = None
         self.direct_tracker = None
         self.next_due = 0
+        self.person_due = self.face_due = None
+        self.completed_frame_id = 0
 
-    def queue_frame(self, image):
+    def queue_frame(self, image, video_seconds=None):
         now = time.monotonic()
         with self.lock:
             if self.cancel.is_set():
@@ -115,11 +122,17 @@ class CameraRun:
             self.last_frame_at = datetime.now(UTC).isoformat()
             self.last_frame_mono = now
             frame = self.latest = Frame(
-                image, self.stream_session_id, self.session_captured, self.last_frame_at, now
+                image,
+                self.stream_session_id,
+                self.session_captured,
+                self.last_frame_at,
+                now,
+                video_seconds,
             )
 
         if self.clips:
             self.clips.offer(self.camera_id, frame)
+        return frame
 
     def retry(self, code):
         with self.lock:
@@ -250,10 +263,25 @@ class CameraRun:
                 if self.cancel.is_set():
                     return
                 index += 1
-                self.queue_frame(image)
+                frame = self.queue_frame(image, (index - 1) / self.input_fps)
+                # Bound lossless MP4 to one in-flight frame; wait before EOF/loop.
+                while self.lossless_mp4() and not self.cancel.is_set():
+                    with self.lock:
+                        if (
+                            frame.stream_session_id != self.stream_session_id
+                            or self.completed_frame_id >= frame.frame_id
+                        ):
+                            break
+                    self.cancel.wait(0.005)
         finally:
             if cap is not None:
                 cap.release()
+
+    def lossless_mp4(self):
+        return self.source_type == "mp4" and (
+            (self.settings.person_detection_enabled and self.settings.person_all_frames)
+            or self.settings.face_all_frames
+        )
 
     def fail(self, code):
         with self.lock:
@@ -269,6 +297,9 @@ class CameraRun:
         with self.lock:
             elapsed = max(0.001, (self.ended_mono or time.monotonic()) - self.created_mono)
             return {
+                "person_detection_frames": self.person_frames,
+                "face_detection_frames": self.face_detection_frames,
+                "all_frames_mode": self.lossless_mp4(),
                 "camera_id": self.camera_id,
                 "state": self.state,
                 "error_code": self.error_code,
@@ -301,6 +332,8 @@ class CameraRun:
                 "pending_frames": int(self.latest is not None),
                 "capture_fps": round(self.captured / elapsed, 2),
                 "detection_fps": round(self.processed / elapsed, 2),
+                "person_detection_fps": round(self.person_frames / elapsed, 2),
+                "face_detection_fps": round(self.face_detection_frames / elapsed, 2),
                 "face_analysis_fps": round(self.face_counts["analysis_frames"] / elapsed, 2),
                 "face_roi_fps": round(self.face_counts["roi_attempts"] / elapsed, 2),
                 "face_counts": dict(self.face_counts),
@@ -402,19 +435,24 @@ class WorkerRuntime:
             for run in self.runs.values():
                 with run.lock:
                     run.next_due = 0
+                    run.person_due = run.face_due = None
                     if getattr(run, "source_type", None) == "mp4":
                         if mode_changed:
                             run.clear_session(rotate=True)
                         elif criteria_changed and not values.person_detection_enabled:
                             run.faces = run.result = run.jpeg = None
                     if run.tracker:
-                        run.tracker.fps = values.detection_fps
+                        run.tracker.fps = (
+                            (run.input_fps or values.detection_fps)
+                            if values.person_all_frames
+                            else values.detection_fps
+                        )
                         run.tracker.tracker.max_frames_lost = max(
-                            1, round(self.settings.track_lost_seconds * values.detection_fps)
+                            1, round(self.settings.track_lost_seconds * run.tracker.fps)
                         )
             if self.face_analyzer:
                 self.face_analyzer.info.setdefault("quality", {}).update(
-                    interval_seconds=values.face_analysis_interval,
+                    interval_seconds=face_interval(values),
                     max_rois_per_frame=values.face_rois_per_frame,
                 )
             self.sampling_revision = revision
@@ -527,19 +565,26 @@ class WorkerRuntime:
                             run.jpeg = run.result = run.tracker = run.faces = run.reid = None
                             run.direct_tracker = None
                             continue
-                        if run.latest is None or time.monotonic() < run.next_due:
+                        if run.latest is None or (
+                            not run.lossless_mp4() and time.monotonic() < run.next_due
+                        ):
                             continue
                         frame, run.latest = run.latest, None
-                        run.next_due = time.monotonic() + 1 / self.settings.detection_fps
-                    batch.append((run, frame))
+                        rate = max(
+                            self.settings.detection_fps,
+                            1 / max(face_interval(self.settings), 1 / (run.input_fps or 25)),
+                        )
+                        run.next_due = time.monotonic() + 1 / rate
+                        person_due, face_due = self.frame_cadence(run, frame)
+                    batch.append((run, frame, person_due, face_due))
                 if not batch:
                     continue
                 try:
                     start = time.monotonic()
                     person_indices = [
                         index
-                        for index, (run, _) in enumerate(batch)
-                        if not self.uploaded_face_mode(run)
+                        for index, (run, _, person_due, _) in enumerate(batch)
+                        if person_due and not self.uploaded_face_mode(run)
                     ]
                     images = [batch[index][1].image for index in person_indices]
                     boxes = [None] * len(batch)
@@ -560,7 +605,7 @@ class WorkerRuntime:
                         self.batch_counts[len(images)] += 1
                         self.batch_ms.append(detection_ms * len(batch))
                 except Exception:
-                    for run, frame in batch:
+                    for run, frame, _, _ in batch:
                         with run.lock:
                             if (
                                 not run.cancel.is_set()
@@ -568,8 +613,19 @@ class WorkerRuntime:
                             ):
                                 run.fail("inference_failed")
                     continue
-                for (run, frame), frame_boxes in zip(batch, boxes, strict=True):
-                    self.process_frame(run, frame, frame_boxes, detection_ms)
+                for (run, frame, person_due, face_due), frame_boxes in zip(
+                    batch, boxes, strict=True
+                ):
+                    self.process_frame(run, frame, frame_boxes, detection_ms, face_due=face_due)
+                    with run.lock:
+                        if frame.stream_session_id == run.stream_session_id:
+                            run.completed_frame_id = frame.frame_id
+                            run.person_frames += int(
+                                person_due and not self.uploaded_face_mode(run)
+                            )
+                            run.face_detection_frames += int(
+                                face_due and self.face_analyzer is not None
+                            )
             self.cancel.wait(0.005)
 
     def scheduler_status(self):
@@ -581,18 +637,46 @@ class WorkerRuntime:
             "batches_by_size": dict(self.batch_counts),
             "batch_mean_ms": round(float(np.mean(self.batch_ms)), 2) if self.batch_ms else None,
             "detection_timing": "batch inference including transfers/NMS divided by batch size",
-            "policy": "rotating ready cameras; latest frame only; no batching wait; shrink batches for costly face analysis",
+            "policy": "independent person/face cadence; bounded latest RTSP frame; lossless MP4 when all-frames enabled; rotating GPU batches",
         }
 
     def uploaded_face_mode(self, run):
         # This new identity-comparison path is only for user-uploaded recordings.
         return run.source_type == "mp4" and not self.settings.person_detection_enabled
 
-    def process_frame(self, run, frame, boxes, detection_ms):
+    def frame_cadence(self, run, frame):
+        clock = frame.video_seconds if frame.video_seconds is not None else frame.captured_mono
+        due = []
+        for name, interval in (
+            (
+                "person_due",
+                0 if self.settings.person_all_frames else 1 / self.settings.detection_fps,
+            ),
+            ("face_due", face_interval(self.settings)),
+        ):
+            deadline = getattr(run, name)
+            ready = interval == 0 or deadline is None or clock + 1e-8 >= deadline
+            if ready:
+                if interval:
+                    anchor = clock if deadline is None else deadline
+                    setattr(
+                        run,
+                        name,
+                        anchor + (int(max(0, clock - anchor) / interval + 1e-8) + 1) * interval,
+                    )
+                else:
+                    setattr(run, name, clock)
+            due.append(ready)
+        return tuple(due)
+
+    def process_frame(self, run, frame, boxes, detection_ms, *, face_due=None):
         try:
             direct = self.uploaded_face_mode(run)
             analyzer = self.face_analyzer
             direct_start = time.monotonic()
+            tracking_time = (
+                frame.video_seconds if frame.video_seconds is not None else frame.captured_mono
+            )
             if direct:
                 from app.worker.uploaded_faces import (
                     FaceBoxTracker,
@@ -605,7 +689,11 @@ class WorkerRuntime:
                         return
                 if analyzer is None:
                     raise RuntimeError("Face detector unavailable")
-                detections = detect_uploaded_faces(analyzer, frame, self.settings, run.cancel)
+                detections = (
+                    detect_uploaded_faces(analyzer, frame, self.settings, run.cancel)
+                    if face_due is not False
+                    else []
+                )
                 detection_ms = (time.monotonic() - direct_start) * 1000
             with run.lock:
                 if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
@@ -613,13 +701,30 @@ class WorkerRuntime:
                 if direct:
                     if run.direct_tracker is None:
                         run.direct_tracker = FaceBoxTracker(self.settings)
-                    tracks, candidates = run.direct_tracker.update(detections, frame.captured_mono)
+                    if face_due is False:
+                        tracks, candidates = (
+                            run.direct_tracker.visible_tracks(frame.captured_mono),
+                            {},
+                        )
+                    else:
+                        tracks, candidates = run.direct_tracker.update(
+                            detections, frame.captured_mono
+                        )
                     analyzer = UploadedFaceAnalyzer(analyzer, candidates)
                     live_ids = run.direct_tracker.live_ids()
                 else:
                     if run.tracker is None:
                         run.tracker = CameraTracker(self.settings)
-                    tracks = run.tracker.update(boxes, frame.image, frame.captured_mono)
+                        if self.settings.person_all_frames:
+                            run.tracker.fps = run.input_fps or self.settings.detection_fps
+                            run.tracker.tracker.max_frames_lost = max(
+                                1, round(self.settings.track_lost_seconds * run.tracker.fps)
+                            )
+                    tracks = (
+                        run.tracker.update(boxes, frame.image, tracking_time)
+                        if boxes is not None
+                        else run.tracker.predict(frame.image, tracking_time)
+                    )
                     live_ids = run.tracker.live_ids()
                 if run.faces is None:
                     run.faces = TrackFaces(self.settings)
@@ -627,7 +732,7 @@ class WorkerRuntime:
             face_start = direct_start if direct else time.monotonic()
             face_counts = Counter()
             if self.face_analyzer is not None:
-                face_counts = faces.process(analyzer, frame, tracks, live_ids)
+                face_counts = faces.process(analyzer, frame, tracks, live_ids, inspect_due=face_due)
             face_process_ms = (time.monotonic() - face_start) * 1000
             search_start = time.monotonic()
             gallery_revision = None
@@ -731,6 +836,14 @@ class WorkerRuntime:
                     "search_status": search_status,
                     "detection_confidence": self.settings.detection_confidence,
                     "detection_mode": "face" if direct else "person",
+                    "person_detection_performed": boxes is not None and not direct,
+                    "face_detection_performed": face_due is not False
+                    and self.face_analyzer is not None,
+                    "person_all_frames": self.settings.person_all_frames,
+                    "face_all_frames": self.settings.face_all_frames,
+                    "person_detection_fps": self.settings.detection_fps,
+                    "face_detection_fps": 1
+                    / max(face_interval(self.settings), 1 / (run.input_fps or 25)),
                     "face_detection_threshold": self.settings.video_face_detection_threshold
                     if direct
                     else None,

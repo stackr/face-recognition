@@ -15,12 +15,16 @@ class FaceBoxTracker:
         self.settings = settings
         self.identifiers = count(1)
         self.seen = {}
+        self.confidences = {}
 
     def update(self, detections, now):
         self.seen = {
             identifier: value
             for identifier, value in self.seen.items()
             if now - value[1] <= self.settings.track_lost_seconds
+        }
+        self.confidences = {
+            key: value for key, value in self.confidences.items() if key in self.seen
         }
         pairs = sorted(
             (
@@ -43,12 +47,24 @@ class FaceBoxTracker:
                     continue
                 identifier = next(self.identifiers)
             self.seen[identifier] = (face["bbox"].copy(), now)
+            self.confidences[identifier] = round(face["confidence"], 4)
             bbox = np.round(face["bbox"], 1).tolist()
             tracks.append(
                 {"track_id": identifier, "bbox": bbox, "confidence": round(face["confidence"], 4)}
             )
             candidates[tuple(bbox)] = face
         return tracks, candidates
+
+    def visible_tracks(self, now):
+        return [
+            {
+                "track_id": identifier,
+                "bbox": np.round(value[0], 1).tolist(),
+                "confidence": self.confidences.get(identifier, 0),
+            }
+            for identifier, value in self.seen.items()
+            if now - value[1] <= self.settings.track_lost_seconds
+        ]
 
     def live_ids(self):
         return set(self.seen)

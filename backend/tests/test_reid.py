@@ -149,9 +149,9 @@ def test_stop_during_face_work_cannot_recreate_private_body_cache(app_context):
     runtime.reidentifier = StubReid()
     original = runtime.process_frame
 
-    def observed(*args):
+    def observed(*args, **kwargs):
         try:
-            original(*args)
+            original(*args, **kwargs)
         finally:
             finished.set()
 

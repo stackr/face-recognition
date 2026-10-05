@@ -79,3 +79,31 @@ class CameraTracker:
             }
             for row in rows
         ]
+
+    def predict(self, image, now):
+        """Project active boxes between detector ticks without new detections."""
+        height, width = image.shape[:2]
+        rows = []
+        for track in self.tracker.tracked_stracks:
+            if now - self.seen.get(track.track_id, now) > self.lost_seconds:
+                continue
+            mean = track.mean.copy()
+            elapsed = max(0, now - (self.last_update if self.last_update is not None else now)) * self.fps
+            mean[:4] += mean[4:] * elapsed
+            box_width, box_height = max(1, mean[2] * mean[3]), max(1, mean[3])
+            x, y = mean[:2]
+            bbox = [
+                max(0, min(width, x - box_width / 2)),
+                max(0, min(height, y - box_height / 2)),
+                max(0, min(width, x + box_width / 2)),
+                max(0, min(height, y + box_height / 2)),
+            ]
+            if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
+                rows.append(
+                    {
+                        "track_id": track.track_id,
+                        "bbox": [round(float(v), 1) for v in bbox],
+                        "confidence": round(float(track.score), 3),
+                    }
+                )
+        return rows

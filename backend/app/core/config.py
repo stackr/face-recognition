@@ -66,7 +66,10 @@ class Settings(BaseSettings):
     face_test_max_faces_per_frame: int = Field(default=100, ge=1, le=500)
     face_test_max_duration_seconds: int = Field(default=3600, ge=1, le=14400)
     video_dir: Path = ROOT / "data/videos"
-    detection_fps: float = Field(default=5, ge=1, le=15)
+    detection_fps: float = Field(default=5, ge=1, le=240)
+    person_all_frames: bool = False
+    face_detection_fps: float | None = Field(default=None, ge=0.1, le=240)
+    face_all_frames: bool = False
     capture_decode_threads: int = Field(default=2, ge=1, le=8)
     opencv_threads: int = Field(default=2, ge=1, le=8)
     detector_batch_size: int = Field(default=4, ge=1, le=4)

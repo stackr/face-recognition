@@ -51,7 +51,13 @@ def test_settings_auth_validation_conflict_pending_and_ack(app_context, admin_he
     assert client.put("/api/function-settings", json=values | {"revision": 0}).status_code == 403
     for bad in (
         {"face_analysis_interval": 0.1},
-        {"detection_fps": 16},
+        {"detection_fps": 241},
+        {"face_detection_fps": 0},
+        {"face_detection_fps": 241},
+        {"face_detection_fps": "NaN"},
+        {"face_detection_fps": None},
+        {"face_all_frames": "true"},
+        {"person_all_frames": 1},
         {"face_rois_per_frame": 1.5},
         {"face_match_threshold": -1.01},
         {"face_match_threshold": 1.01},
@@ -124,7 +130,9 @@ def test_older_saved_sampling_controls_keep_values_and_use_environment_threshold
         db.commit()
     value = client.get("/api/function-settings").json()
     assert value["revision"] == 9
-    assert value["values"] == SamplingSettings.defaults(settings).model_dump() | legacy
+    assert value["values"] == SamplingSettings.defaults(settings).model_dump() | legacy | {
+        "face_detection_fps": 1 / 0.3
+    }
     with Session(engine) as db:
         assert db.get(FunctionSettings, 1).values == legacy
         row = db.get(FunctionSettings, 1)

@@ -219,7 +219,7 @@ class TrackFaces:
         self.lock = threading.RLock()
         self.tracks = {}
 
-    def process(self, analyzer, frame, tracks, live_ids):
+    def process(self, analyzer, frame, tracks, live_ids, *, inspect_due=None):
         counts = Counter()
         event_frame_jpeg = None
         with self.lock:
@@ -273,8 +273,14 @@ class TrackFaces:
                     track
                     for track in tracks
                     if track["track_id"] in self.tracks
-                    and frame.captured_mono - self.tracks[track["track_id"]]["last_attempt"]
-                    >= self.settings.face_analysis_interval
+                    and (
+                        inspect_due is True
+                        or (
+                            inspect_due is None
+                            and frame.captured_mono - self.tracks[track["track_id"]]["last_attempt"]
+                            >= self.settings.face_analysis_interval
+                        )
+                    )
                 ],
                 key=lambda track: self.tracks[track["track_id"]]["last_attempt"],
             )[: self.settings.face_rois_per_frame]
