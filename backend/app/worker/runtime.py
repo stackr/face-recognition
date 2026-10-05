@@ -55,6 +55,7 @@ class CameraRun:
         self.stream_session_id = uuid.uuid4().hex
         self.tracker = None
         self.direct_tracker = None
+        self.person_images = {}
         self.faces = None
         self.reid = None
         self.latest = None
@@ -117,6 +118,7 @@ class CameraRun:
             self.connected_at = None
         self.latest = self.jpeg = self.result = self.tracker = self.faces = self.reid = None
         self.direct_tracker = None
+        self.person_images = {}
         self.next_due = 0
         self.person_due = self.face_due = None
         self.completed_frame_id = 0
@@ -459,7 +461,7 @@ class WorkerRuntime:
                     if getattr(run, "source_type", None) == "mp4":
                         if mode_changed and getattr(run, "person_detection_override", None) is None:
                             run.clear_session(rotate=True)
-                        elif criteria_changed and not run.person_detection_enabled:
+                        elif criteria_changed and self.uploaded_face_mode(run):
                             run.faces = run.result = run.jpeg = None
                     if run.tracker:
                         run.tracker.fps = (
@@ -595,6 +597,7 @@ class WorkerRuntime:
                             run.ended_mono = time.monotonic()
                             run.jpeg = run.result = run.tracker = run.faces = run.reid = None
                             run.direct_tracker = None
+                            run.person_images = {}
                             continue
                         if run.latest is None or (
                             not run.lossless_mp4() and time.monotonic() < run.next_due
@@ -663,9 +666,7 @@ class WorkerRuntime:
                     with run.lock:
                         if frame.stream_session_id == run.stream_session_id:
                             run.completed_frame_id = frame.frame_id
-                            run.person_frames += int(
-                                person_due and not self.uploaded_face_mode(run)
-                            )
+                            run.person_frames += int(person_due and run.person_detection_enabled)
                             run.face_detection_frames += int(
                                 face_due
                                 and self.face_analyzer is not None
@@ -687,7 +688,11 @@ class WorkerRuntime:
 
     def uploaded_face_mode(self, run):
         # This new identity-comparison path is only for user-uploaded recordings.
-        return run.source_type == "mp4" and not run.person_detection_enabled
+        return (
+            run.source_type == "mp4"
+            and run.face_detection_enabled
+            and (not run.person_detection_enabled or run.person_detection_override is not None)
+        )
 
     def frame_cadence(self, run, frame):
         clock = frame.video_seconds if frame.video_seconds is not None else frame.captured_mono
@@ -721,6 +726,43 @@ class WorkerRuntime:
             )
         return tuple(due)
 
+    def capture_people(self, run, frame, tracks, detector_ran):
+        """Bounded, session-local body crops; caller holds run.lock."""
+        now = frame.captured_mono
+        live_ids = run.tracker.live_ids()
+        run.person_images = {
+            key: value
+            for key, value in run.person_images.items()
+            if key in live_ids and now - value[2] <= self.settings.track_lost_seconds
+        }
+        height, width = frame.image.shape[:2]
+        for track in tracks:
+            identifier = track["track_id"]
+            if detector_ran:
+                x1, y1 = np.floor(track["bbox"][:2]).astype(int)
+                x2, y2 = np.ceil(track["bbox"][2:]).astype(int)
+                x1, x2 = np.clip([x1, x2], 0, width)
+                y1, y2 = np.clip([y1, y2], 0, height)
+                if x2 > x1 and y2 > y1:
+                    crop = frame.image[y1:y2, x1:x2]
+                    scale = min(1, 320 / max(crop.shape[:2]))
+                    if scale < 1:
+                        crop = cv2.resize(
+                            crop,
+                            (
+                                max(1, round(crop.shape[1] * scale)),
+                                max(1, round(crop.shape[0] * scale)),
+                            ),
+                        )
+                    ok, jpeg = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                    if ok:
+                        run.person_images[identifier] = (jpeg.tobytes(), frame.frame_id, now)
+            cached = run.person_images.get(identifier)
+            track["person_image"] = {"frame_id": cached[1]} if cached else None
+        run.person_images = dict(
+            sorted(run.person_images.items(), key=lambda item: item[1][2], reverse=True)[:100]
+        )
+
     def process_frame(self, run, frame, boxes, detection_ms, *, face_due=None):
         try:
             direct = self.uploaded_face_mode(run)
@@ -750,6 +792,21 @@ class WorkerRuntime:
             with run.lock:
                 if run.cancel.is_set() or frame.stream_session_id != run.stream_session_id:
                     return
+                person_tracks = []
+                if run.person_detection_enabled:
+                    if run.tracker is None:
+                        run.tracker = CameraTracker(self.settings)
+                        if self.settings.person_all_frames:
+                            run.tracker.fps = run.input_fps or self.settings.detection_fps
+                            run.tracker.tracker.max_frames_lost = max(
+                                1, round(self.settings.track_lost_seconds * run.tracker.fps)
+                            )
+                    person_tracks = (
+                        run.tracker.update(boxes, frame.image, tracking_time)
+                        if boxes is not None
+                        else run.tracker.predict(frame.image, tracking_time)
+                    )
+                    self.capture_people(run, frame, person_tracks, boxes is not None)
                 if direct:
                     if run.direct_tracker is None:
                         run.direct_tracker = FaceBoxTracker(self.settings)
@@ -765,19 +822,8 @@ class WorkerRuntime:
                     analyzer = UploadedFaceAnalyzer(analyzer, candidates)
                     live_ids = run.direct_tracker.live_ids()
                 else:
-                    if run.tracker is None:
-                        run.tracker = CameraTracker(self.settings)
-                        if self.settings.person_all_frames:
-                            run.tracker.fps = run.input_fps or self.settings.detection_fps
-                            run.tracker.tracker.max_frames_lost = max(
-                                1, round(self.settings.track_lost_seconds * run.tracker.fps)
-                            )
-                    tracks = (
-                        run.tracker.update(boxes, frame.image, tracking_time)
-                        if boxes is not None
-                        else run.tracker.predict(frame.image, tracking_time)
-                    )
-                    live_ids = run.tracker.live_ids()
+                    tracks = person_tracks
+                    live_ids = run.tracker.live_ids() if run.tracker else set()
                 if run.faces is None:
                     run.faces = TrackFaces(self.settings)
                 faces = run.faces
@@ -803,7 +849,7 @@ class WorkerRuntime:
             face_ms = (time.monotonic() - face_start) * 1000
             reid_counts = Counter()
             reid_start = time.monotonic()
-            if self.reidentifier is not None and not direct:
+            if self.reidentifier is not None and run.person_detection_enabled:
                 from app.worker.reid import BodyTrackCache
 
                 with run.lock:
@@ -813,23 +859,28 @@ class WorkerRuntime:
                         run.reid = BodyTrackCache(self.settings)
                     reid = run.reid
                 try:
-                    reid_counts = reid.process(self.reidentifier, frame, tracks, live_ids)
+                    reid_counts = reid.process(
+                        self.reidentifier, frame, person_tracks, run.tracker.live_ids()
+                    )
                 except Exception:
                     reid_counts["failures"] += 1
-                    for track in tracks:
+                    for track in person_tracks:
                         track["reid"] = {"status": "unavailable", "embedding_ready": False}
             reid_ms = (time.monotonic() - reid_start) * 1000
             annotated = frame.image.copy()
-            for track in tracks:
+            for track in person_tracks + tracks if direct else tracks:
+                is_face = direct and any(track is face_track for face_track in tracks)
                 x1, y1, x2, y2 = map(int, track["bbox"])
-                cv2.rectangle(annotated, (x1, y1), (x2, y2), (80, 230, 120), 2)
+                cv2.rectangle(
+                    annotated, (x1, y1), (x2, y2), (100, 220, 255) if is_face else (80, 230, 120), 2
+                )
                 cv2.putText(
                     annotated,
-                    f"{'face' if direct else 'person'} #{track['track_id']} {track['confidence']:.2f}",
+                    f"{'face' if is_face else 'person'} #{track['track_id']} {track['confidence']:.2f}",
                     (max(0, x1), max(20, y1 - 8)),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.6,
-                    (80, 230, 120),
+                    (100, 220, 255) if is_face else (80, 230, 120),
                     2,
                 )
                 face = track.get("face", {})
@@ -884,13 +935,23 @@ class WorkerRuntime:
                     "frame_id": frame.frame_id,
                     "captured_at": frame.captured_at,
                     "tracks": tracks,
+                    "person_tracks": [
+                        {
+                            key: track[key]
+                            for key in ("track_id", "bbox", "confidence", "person_image", "reid")
+                            if key in track
+                        }
+                        for track in person_tracks
+                    ],
+                    "independent_detection": direct and run.person_detection_enabled,
                     "gallery_revision": gallery_revision,
                     "search_status": search_status,
                     "person_detection_enabled": run.person_detection_enabled,
                     "face_detection_enabled": run.face_detection_enabled,
                     "detection_confidence": self.settings.detection_confidence,
                     "detection_mode": "face" if direct else "person",
-                    "person_detection_performed": boxes is not None and not direct,
+                    "person_detection_performed": boxes is not None
+                    and run.person_detection_enabled,
                     "face_detection_performed": face_due is not False
                     and self.face_analyzer is not None
                     and run.face_detection_enabled,
@@ -914,7 +975,10 @@ class WorkerRuntime:
                     run.face_ms.append(face_ms)
                     run.face_process_ms.append(face_process_ms)
                     run.face_search_ms.append(face_search_ms)
-                run.max_people = max(run.max_people, len(tracks))
+                run.max_people = max(
+                    run.max_people,
+                    len(person_tracks) if run.person_detection_enabled else len(tracks),
+                )
                 run.detection_ms.append(detection_ms)
                 run.latencies.append((time.monotonic() - frame.captured_mono) * 1000)
                 if run.state != "draining":

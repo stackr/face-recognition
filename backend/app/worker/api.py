@@ -405,6 +405,25 @@ def create_worker(
                 },
             )
 
+    @app.get("/internal/cameras/{camera_id}/people/{track_id}", dependencies=[Depends(authorized)])
+    def person_thumbnail(camera_id: int, track_id: int, stream_session_id: str, request: Request):
+        run = camera(request, camera_id)
+        with run.lock:
+            cached = run.person_images.get(track_id)
+            if (
+                stream_session_id != run.stream_session_id
+                or run.state not in {"running", "draining"}
+                or not run.person_detection_enabled
+                or cached is None
+                or time.monotonic() - cached[2] > settings.track_lost_seconds
+            ):
+                raise HTTPException(404, "Person image not available")
+            return Response(
+                cached[0],
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+            )
+
     @app.get("/internal/cameras/{camera_id}/faces/{track_id}", dependencies=[Depends(authorized)])
     def thumbnail(camera_id: int, track_id: int, stream_session_id: str, request: Request):
         run = camera(request, camera_id)

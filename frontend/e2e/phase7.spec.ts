@@ -104,7 +104,7 @@ test('Live Search 영상·가운데 이벤트·오른쪽 분석 배치, 얼굴 �
     await expect(stopButton).toBeEnabled();
     await expect(stopButton).toHaveClass(/btn-danger/);
     await expect(stopButton).toHaveCSS('background-color', 'rgb(220, 53, 69)');
-    const preview = page.getByAltText('사람 탐지와 추적 번호가 표시된 카메라 영상');
+    const preview = page.getByAltText('검출 결과와 추적 번호가 표시된 카메라 영상');
     await expect.poll(() => preview.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
     const card = panel.locator('.event-card').filter({hasText:personName});
     await expect(card).toHaveCount(1, {timeout:30000});

@@ -318,6 +318,26 @@ async def preview(camera_id: int, request: Request):
     )
 
 
+@router.get("/{camera_id}/people/{track_id}")
+def person_thumbnail(
+    camera_id: int,
+    track_id: int,
+    request: Request,
+    stream_session_id: str = Query(pattern=r"^[a-f0-9]{32}$"),
+):
+    preview_access(request, camera_id)
+    response = request.app.state.worker.request(
+        "GET",
+        f"/internal/cameras/{camera_id}/people/{track_id}",
+        params={"stream_session_id": stream_session_id},
+    )
+    return Response(
+        response.content,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )
+
+
 @router.get("/{camera_id}/faces/{track_id}")
 def face_thumbnail(
     camera_id: int,

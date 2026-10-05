@@ -36,7 +36,7 @@ test('MP4 업로드, GPU 분석, 인증 미리보기와 시작·중지', async (
     await expect(page.getByLabel('카메라', {exact:true}).locator('option:checked')).toHaveText(name);
     await page.getByRole('button', {name:'분석 시작', exact:true}).click();
     await expect(page.locator('.analysis-state')).toHaveText('분석 중', {timeout:15000});
-    const image = page.getByAltText('사람 탐지와 추적 번호가 표시된 카메라 영상');
+    const image = page.getByAltText('검출 결과와 추적 번호가 표시된 카메라 영상');
     await expect(image).toBeVisible();
     await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
     await expect.poll(async () => {

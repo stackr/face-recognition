@@ -122,8 +122,18 @@ test('업로드 MP4 얼굴 직접 검출, 등록 인물 이벤트, 기준 변경
     await expect(page.getByLabel('사람 검출 사용', {exact:true})).toBeEnabled();
     await page.getByLabel('사람 검출 사용', {exact:true}).check();
     await page.getByRole('button', {name:'분석 시작', exact:true}).click();
-    await expect.poll(async () => (await state()).result?.detection_mode).toBe('person');
+    await expect.poll(async () => (await state()).result?.independent_detection).toBe(true);
+    await expect.poll(async () => (await state()).result?.person_tracks.length).toBeGreaterThan(0);
+    await expect.poll(async () => (await state()).result?.tracks.length).toBe(2);
     expect((await state()).stream_session_id).not.toBe(session);
+    await expect(page.locator('.person-grid .person-track-image').first()).toBeVisible();
+    await expect.poll(() => page.locator('.person-grid .person-track-image').first().evaluate((img:HTMLImageElement) => img.naturalHeight)).toBeGreaterThan(0);
+    await expect(page.locator('.faces-panel').getByRole('heading', {name:'사람 검출', exact:true})).toBeVisible();
+    await expect(page.locator('.faces-panel').getByRole('heading', {name:'얼굴 검출', exact:true})).toBeVisible();
+    await page.locator('.faces-panel').screenshot({path:'../data/screenshots/person-and-face-tracks-desktop.png'});
+    await page.setViewportSize({width:390,height:844});
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.locator('.faces-panel').screenshot({path:'../data/screenshots/person-and-face-tracks-mobile.png'});
     expect(errors).toEqual([]);
   } finally {
     test.setTimeout(180000);

@@ -63,7 +63,9 @@ def test_explicit_camera_choices_ignore_legacy_global_mode_changes(app_context):
             )
             runtime.apply_sampling()
             assert [run.stream_session_id for run in runs] == sessions
-            assert not runtime.uploaded_face_mode(runs[0])
+            assert runs[0].person_detection_enabled is True
+            assert runs[1].person_detection_enabled is False
+            assert runtime.uploaded_face_mode(runs[0])
             assert runtime.uploaded_face_mode(runs[1])
             runtime.runs.clear()
     finally:

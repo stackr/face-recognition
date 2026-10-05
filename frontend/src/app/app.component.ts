@@ -30,13 +30,13 @@ interface FaceStatus {
   sample_count?: number;
   comparison?: {outcome: string; top_similarity: number | null; threshold: number};
 }
-interface AnalysisTrack {track_id: number; confidence: number; face?: FaceStatus; reid?: {status: string; embedding_ready: boolean; identity_assignment?: boolean};}
+interface AnalysisTrack {person_image?: {frame_id:number} | null; track_id: number; confidence: number; face?: FaceStatus; reid?: {status: string; embedding_ready: boolean; identity_assignment?: boolean};}
 interface AnalysisStatus {
   camera_id: number; state: string; error_code?: string; source_type?: string; stream_session_id?: string;
   person_detection_enabled?: boolean; face_detection_enabled?: boolean;
   person_detection_fps?: number; face_detection_fps?: number;
   detection_fps?: number; capture_fps?: number; processed_frames?: number; dropped_frames?: number;
-  latency_p95_ms?: number; resolution?: number[]; result?: {tracks: AnalysisTrack[]; detection_confidence?: number; detection_mode?: string; face_detection_threshold?: number; min_face_size?: number};
+  latency_p95_ms?: number; resolution?: number[]; result?: {tracks: AnalysisTrack[]; person_tracks?: AnalysisTrack[]; face_tracks?: AnalysisTrack[]; independent_detection?: boolean; detection_confidence?: number; detection_mode?: string; face_detection_threshold?: number; min_face_size?: number};
   face_analysis_fps?: number; face_roi_fps?: number; face_counts?: {embeddings_created?: number; faces_detected?: number};
   actual_device?: string; reconnect_attempts?: number; reconnects?: number;
   loop?: boolean;
@@ -503,6 +503,11 @@ export class AppComponent implements OnDestroy {
       next: value => { this.selectedCamera.set(value); this.analysisSource = 'mp4'; this.busy.set(false); this.notice.set('시험 영상을 업로드했습니다. 분석 시작을 눌러 주세요.'); this.refresh(); input.value = ''; },
       error: err => { this.busy.set(false); this.handleError(err); input.value = ''; }
     });
+  }
+  personTracks() {return this.analysis()?.result?.person_tracks ?? [];}
+  faceTracks() {return this.analysis()?.face_detection_enabled === false ? [] : this.analysis()?.result?.face_tracks ?? this.analysis()?.result?.tracks ?? [];}
+  personUrl(track: AnalysisTrack) {
+    return `/api/cameras/${this.selectedCamera()?.camera_id}/people/${track.track_id}?stream_session_id=${this.analysis()?.stream_session_id}&v=${track.person_image?.frame_id}`;
   }
   faceUrl(track: AnalysisTrack) {
     return `/api/cameras/${this.selectedCamera()?.camera_id}/faces/${track.track_id}?stream_session_id=${this.analysis()?.stream_session_id}&v=${track.face?.best?.frame_id}`;

@@ -179,7 +179,8 @@ def test_face_sampling_quality_gate_best_face_expiry_and_bounded_fairness(app_co
     assert second[1]["face"]["embedding_ready"]
 
 
-def test_thumbnail_auth_camera_grants_revocation_and_disabled(app_context, admin_headers):
+@pytest.mark.parametrize("kind", ["faces", "people"])
+def test_thumbnail_auth_camera_grants_revocation_and_disabled(app_context, admin_headers, kind):
     client = app_context[0]
     camera_id = client.post("/api/cameras", json=PAYLOAD, headers=admin_headers).json()["camera_id"]
     calls = []
@@ -189,11 +190,11 @@ def test_thumbnail_auth_camera_grants_revocation_and_disabled(app_context, admin
         return httpx.Response(200, content=b"\xff\xd8sample")
 
     replace_worker(client, handler)
-    path = f"/api/cameras/{camera_id}/faces/1?stream_session_id={'a' * 32}"
+    path = f"/api/cameras/{camera_id}/{kind}/1?stream_session_id={'a' * 32}"
     response = client.get(path)
     assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
     assert calls[-1].url.params["stream_session_id"] == "a" * 32
-    assert client.get(f"/api/cameras/{camera_id}/faces/1").status_code == 422
+    assert client.get(f"/api/cameras/{camera_id}/{kind}/1").status_code == 422
     client.post("/api/auth/login", json={"username": "viewer", "password": TEST_PASSWORD})
     assert client.get(path).status_code == 403
     login = client.post("/api/auth/login", json={"username": "admin", "password": TEST_PASSWORD})
