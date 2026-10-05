@@ -48,8 +48,8 @@ class CameraRun:
         self.loop, self.settings = loop, settings
         self.actual_device = actual_device
         self.clips = clips
-        self.person_detection_override = person_detection_enabled
-        self.face_detection_enabled = face_detection_enabled
+        self.person_detection_override = True if source_type == "rtsp" else person_detection_enabled
+        self.face_detection_enabled = source_type != "rtsp" and face_detection_enabled
         self.lock = threading.RLock()
         self.cancel = threading.Event()
         self.stream_session_id = uuid.uuid4().hex

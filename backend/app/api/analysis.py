@@ -112,13 +112,15 @@ def start(
         raise HTTPException(409, "Camera disabled")
     settings = request.app.state.settings
     source_type = payload.source_type or camera.source_type
-    if source_type == "rtsp" and (
-        payload.person_detection_enabled is False or not payload.face_detection_enabled
-    ):
-        raise HTTPException(422, "Detector selection is supported for uploaded MP4")
-    if not payload.face_detection_enabled:
+    person_enabled = payload.person_detection_enabled
+    face_enabled = payload.face_detection_enabled
+    if source_type == "rtsp":
+        if person_enabled is False:
+            raise HTTPException(422, "RTSP requires person detection")
+        person_enabled, face_enabled = True, False
+    elif not face_enabled:
         _, controls = load_sampling(db, settings)
-        if payload.person_detection_enabled is None and not controls.person_detection_enabled:
+        if person_enabled is None and not controls.person_detection_enabled:
             raise HTTPException(422, "Select at least one detector")
     if source_type == "mp4":
         if not camera.video_path:
@@ -139,8 +141,8 @@ def start(
             "source": source,
             "source_type": source_type,
             "loop": payload.loop,
-            "person_detection_enabled": payload.person_detection_enabled,
-            "face_detection_enabled": payload.face_detection_enabled,
+            "person_detection_enabled": person_enabled,
+            "face_detection_enabled": face_enabled,
         },
     )
     try:

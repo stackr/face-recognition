@@ -167,8 +167,8 @@
               @if (analysisSource === 'mp4') {<label class="form-check mb-0"><input type="checkbox" class="form-check-input" [(ngModel)]="loopVideo" [disabled]="activeAnalysis()"><span class="form-check-label">반복 재생</span></label>}
               <div class="analysis-detection-options">
                 <label class="form-check mb-0"><input id="live-person-detection" type="checkbox" class="form-check-input" [ngModel]="analysisSource === 'mp4' ? analysisPersonEnabled : true" (ngModelChange)="analysisPersonEnabled = $event; detectionSelectionChanged()" [disabled]="busy() || activeAnalysis() || !camera.can_operate || analysisSource !== 'mp4'"><span class="form-check-label">사람 검출 사용</span></label>
-                <label class="form-check mb-0"><input id="live-face-detection" type="checkbox" class="form-check-input" [ngModel]="analysisSource === 'mp4' ? analysisFaceEnabled : true" (ngModelChange)="analysisFaceEnabled = $event; detectionSelectionChanged()" [disabled]="busy() || activeAnalysis() || !camera.can_operate || analysisSource !== 'mp4'"><span class="form-check-label">얼굴 검출 사용</span></label>
-                <small>업로드 MP4에서 사용할 기능을 선택하세요. 분석 중에는 변경할 수 없습니다.</small>
+                <label class="form-check mb-0"><input id="live-face-detection" type="checkbox" class="form-check-input" [ngModel]="analysisSource === 'mp4' ? analysisFaceEnabled : false" (ngModelChange)="analysisFaceEnabled = $event; detectionSelectionChanged()" [disabled]="busy() || activeAnalysis() || !camera.can_operate || analysisSource !== 'mp4'"><span class="form-check-label">얼굴 검출 사용</span></label>
+                <small>{{ analysisSource === 'rtsp' ? 'RTSP 입력은 사람 검출만 사용합니다. 얼굴 검출·등록 인물 식별·검색 이벤트 생성은 하지 않습니다.' : '업로드 MP4에서 사용할 기능을 선택하세요. 분석 중에는 변경할 수 없습니다.' }}</small>
                 @if (analysisSource === 'mp4' && !analysisPersonEnabled && !analysisFaceEnabled) {<small role="status">사람 검출 또는 얼굴 검출을 하나 이상 선택하세요.</small>}
               </div>
               @if (camera.can_operate) {<button class="btn btn-primary" (click)="startAnalysis()" [disabled]="busy() || activeAnalysis() || !camera.enabled || (analysisSource === 'mp4' && !analysisPersonEnabled && !analysisFaceEnabled) || (analysisSource === 'mp4' && !camera.has_test_video)">분석 시작</button><button class="btn analysis-stop" [class.btn-danger]="!busy() && activeAnalysis()" [class.btn-outline-secondary]="busy() || !activeAnalysis()" (click)="stopAnalysis()" [disabled]="busy() || !activeAnalysis()">분석 중지</button>}
@@ -194,7 +194,7 @@
                 } @empty {<div class="text-secondary">검출한 사람이 없습니다.</div>}
               </div>
             }
-            @if (analysis()?.face_detection_enabled !== false) {
+            @if (analysis()?.face_detection_enabled ?? (analysisSource === 'mp4')) {
               <h3>얼굴 검출</h3>
             <p>{{ analysis()?.result?.detection_mode === 'face' ? '얼굴 검출 테스트와 같은 검출·크기·정렬 조건으로 업로드 영상의 얼굴을 찾습니다. 최근 사진을 함께 비교하고, 2장 이상이 기준을 충족하면 등록 인물 후보로 표시합니다.' : '크기·선명도·밝기·자세를 검사합니다. 최근 품질 통과 사진을 함께 비교하고, 2장 이상이 기준을 충족하면 후보로 표시합니다.' }}</p>
             <div class="face-grid">

@@ -63,7 +63,7 @@ def authorize(client, settings):
     client.headers["X-Service-Token"] = settings.service_token.get_secret_value()
 
 
-def test_rtsp_reconnect_clears_faces_tracks_preview_and_session(app_context, monkeypatch):
+def test_rtsp_reconnect_clears_people_tracks_preview_and_session(app_context, monkeypatch):
     settings = app_context[2]
     configure(settings, delay=0.4)
     first, second = Capture(), Capture()
@@ -81,12 +81,10 @@ def test_rtsp_reconnect_clears_faces_tracks_preview_and_session(app_context, mon
         running = wait_for(
             client,
             "/internal/cameras/1",
-            lambda s: (
-                s["state"] == "running" and s["face_counts"].get("embeddings_created", 0) >= 1
-            ),
+            lambda s: s["state"] == "running" and s["result"] and s["result"]["person_tracks"],
         )
         old = running["stream_session_id"]
-        path = "/internal/cameras/1/faces/1"
+        path = "/internal/cameras/1/people/1"
         assert client.get(path, params={"stream_session_id": old}).status_code == 200
         first.disconnect.set()
         waiting = wait_for(client, "/internal/cameras/1", lambda s: s["state"] == "reconnecting")
@@ -102,14 +100,17 @@ def test_rtsp_reconnect_clears_faces_tracks_preview_and_session(app_context, mon
             lambda s: (
                 s["reconnects"] == 1
                 and s["state"] == "running"
-                and s["face_counts"].get("embeddings_created", 0) >= 2
+                and s["result"]
+                and s["result"]["person_tracks"]
                 and s["dropped_frames"] > 0
             ),
         )
         assert recovered["state"] == "running" and recovered["error_code"] is None
         assert recovered["stream_session_id"] == waiting["stream_session_id"]
         assert recovered["result"]["tracks"][0]["track_id"] == 1
-        assert faces.embeddings >= 2
+        assert faces.embeddings == 0
+        assert recovered["face_detection_enabled"] is False
+        assert recovered["face_detection_frames"] == 0
         assert recovered["session_processed_frames"] < recovered["processed_frames"]
         assert recovered["pending_frames"] <= 1 and recovered["dropped_frames"] > 0
         assert client.get(path, params={"stream_session_id": old}).status_code == 404

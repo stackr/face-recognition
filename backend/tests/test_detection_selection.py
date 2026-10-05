@@ -12,7 +12,8 @@ from test_uploaded_faces import VideoModels
 from test_worker import TestDetector, boxes, wait_for, write_video
 
 
-def test_person_only_skips_face_embedding_gallery_events_and_face_logs(app_context):
+@pytest.mark.parametrize("source_type", ["mp4", "rtsp"])
+def test_person_only_skips_face_embedding_gallery_events_and_face_logs(app_context, source_type):
     settings = app_context[2]
     settings.person_detection_enabled = False
     settings.face_all_frames = True
@@ -26,12 +27,19 @@ def test_person_only_skips_face_embedding_gallery_events_and_face_logs(app_conte
     runtime.events = SimpleNamespace(submit_tracks=forbidden, close=lambda: None)
     runtime.diagnostics = SimpleNamespace(submit_tracks=forbidden, close=lambda: None)
     run = CameraRun(
-        1, "", "mp4", False, settings, person_detection_enabled=True, face_detection_enabled=False
+        1,
+        "",
+        source_type,
+        False,
+        settings,
+        person_detection_enabled=True,
+        face_detection_enabled=source_type == "rtsp",
     )
     frame = Frame(
         np.zeros((120, 160, 3), np.uint8), run.stream_session_id, 1, "2026-10-05T00:00:00Z", 10
     )
     try:
+        assert run.person_detection_enabled and not run.face_detection_enabled
         assert not run.lossless_mp4()  # Disabled face all-frames must not slow people.
         assert runtime.frame_cadence(run, frame) == (True, False)
         runtime.process_frame(run, frame, boxes(), 0, face_due=False)
@@ -145,3 +153,68 @@ def test_public_start_validates_selection_before_worker(app_context, admin_heade
         ).status_code
         == 422
     )
+
+
+@pytest.mark.parametrize(
+    "selection", [{}, {"face_detection_enabled": True}, {"face_detection_enabled": False}]
+)
+def test_public_rtsp_start_forces_people_only(app_context, admin_headers, selection):
+    import json
+
+    import httpx
+    from test_analysis import replace_worker
+    from test_foundation import PAYLOAD
+
+    client, _, settings = app_context
+    settings.person_detection_enabled = False
+    camera_id = client.post("/api/cameras", json=PAYLOAD, headers=admin_headers).json()["camera_id"]
+    commands = []
+
+    def worker(request):
+        commands.append(json.loads(request.content))
+        return httpx.Response(200, json={"camera_id": camera_id, "state": "opening"})
+
+    replace_worker(client, worker)
+    assert (
+        client.post(
+            f"/api/cameras/{camera_id}/start", json=selection, headers=admin_headers
+        ).status_code
+        == 200
+    )
+    assert commands[-1]["person_detection_enabled"] is True
+    assert commands[-1]["face_detection_enabled"] is False
+    assert (
+        client.post(
+            f"/api/cameras/{camera_id}/start",
+            json={"person_detection_enabled": False},
+            headers=admin_headers,
+        ).status_code
+        == 422
+    )
+    assert len(commands) == 1
+
+
+@pytest.mark.parametrize(
+    "selection", [{}, {"face_detection_enabled": True}, {"face_detection_enabled": False}]
+)
+def test_worker_rtsp_start_forces_people_only(app_context, selection):
+    settings = app_context[2]
+    settings.person_detection_enabled = False
+    with TestClient(
+        create_worker(settings, TestDetector(), enable_faces=False, enable_gallery=False)
+    ) as client:
+        client.headers["X-Service-Token"] = settings.service_token.get_secret_value()
+        client.app.state.runtime.start = lambda *args, **kwargs: kwargs
+        payload = {"source": "rtsp://localhost/test", "source_type": "rtsp"}
+        response = client.post("/internal/cameras/1/start", json=payload | selection)
+        assert response.status_code == 200
+        assert response.json() == {
+            "person_detection_enabled": True,
+            "face_detection_enabled": False,
+        }
+        assert (
+            client.post(
+                "/internal/cameras/1/start", json=payload | {"person_detection_enabled": False}
+            ).status_code
+            == 422
+        )

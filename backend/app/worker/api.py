@@ -338,15 +338,13 @@ def create_worker(
                 valid = False
             if not valid:
                 raise HTTPException(422, "Invalid RTSP source")
-        if payload.source_type == "rtsp" and (
-            payload.person_detection_enabled is False or not payload.face_detection_enabled
-        ):
-            raise HTTPException(422, "Detector selection is supported for uploaded MP4")
-        if (
-            payload.person_detection_enabled is None
-            and not settings.person_detection_enabled
-            and not payload.face_detection_enabled
-        ):
+        person_enabled = payload.person_detection_enabled
+        face_enabled = payload.face_detection_enabled
+        if payload.source_type == "rtsp":
+            if person_enabled is False:
+                raise HTTPException(422, "RTSP requires person detection")
+            person_enabled, face_enabled = True, False
+        elif person_enabled is None and not settings.person_detection_enabled and not face_enabled:
             raise HTTPException(422, "Select at least one detector")
         try:
             return request.app.state.runtime.start(
@@ -354,8 +352,8 @@ def create_worker(
                 source,
                 payload.source_type,
                 payload.loop,
-                person_detection_enabled=payload.person_detection_enabled,
-                face_detection_enabled=payload.face_detection_enabled,
+                person_detection_enabled=person_enabled,
+                face_detection_enabled=face_enabled,
             )
         except ValueError:
             raise HTTPException(409, "Camera already active") from None

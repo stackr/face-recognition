@@ -144,3 +144,10 @@ Live Search에서 두 기능을 함께 선택한 업로드 MP4에서도 얼굴�
 사람 이미지는 worker 메모리의 카메라·세션별 캐시에 최대 100장, 긴 변 최대 320px JPEG로 유지한다. 사람 검출 프레임에서만 갱신하고 중지·오류·EOF·반복 시 제거하며 만료된 사진은 반환하지 않는다. `/api/cameras/{id}/people/{track_id}?stream_session_id=...`는 인증·카메라 grant·카메라 활성 상태·세션 일치 검사를 수행하고 no-store로 제공한다. 파일·DB·모델 변경이나 migration은 없다.
 
 검증: 전체 backend 198건·MariaDB 통합 1건·frontend 19건·Ruff·타입/build(633.11 kB) 통과. 신규 검증은 사람 없는 프레임의 독립 얼굴 검출, 사람 이미지 원본 크롭·얼굴 후보 분리, 얼굴 조건 변경 시 캐시 정리, 얼굴 검출 없는 사람 이미지, 세션 교체·중지·EOF·grant 회수·미인증 이미지 차단을 검사했다. 실제 Chrome/CUDA 6개 시험에서 사람만 분석한 카드 이미지, 사람·얼굴 동시 검출과 두 목록, 등록 인물 비교·검색 이벤트·로그, 독립 FPS, 기존 Live Search 배치·미리보기·이미지 팝업, 다크 테마·390px 표시를 확인했다. 기존 미리보기 설명 선택자를 새 설명으로 맞춰 재검증했다. backend·worker를 재시작해 반영했고 기존 카메라 5개·설정·중지 상태를 보존하고 시험용 자료를 정리했다. 화면은 data/screenshots/person-tracks-only-desktop.png, person-and-face-tracks-desktop.png, person-and-face-tracks-mobile.png에 기록했다.
+
+
+### 2026-10-05 RTSP 사람 검출 전용
+
+실제 입력 source_type이 RTSP인 분석에서는 사람 검출을 항상 사용하고 얼굴 검출을 항상 끈다. Live Search에서 두 체크는 고정하며 공개 API·worker API가 동일한 선택을 전달하고 CameraRun도 얼굴 검출을 강제로 비활성화한다. 얼굴 사용을 명시하거나 선택을 생략한 이전 클라이언트 요청도 얼굴 검출을 실행하지 않는다. 사람 검출 해제 요청은 422로 거부한다. 전체 설정의 과거 사람 사용 여부와 얼굴 모든 프레임 옵션에 영향을 받지 않는다. RTSP의 사람 이미지·추적·미리보기·재연결·중지와 선택 Person Re-ID는 유지하고, 얼굴 검사·embedding·등록 인물 비교·얼굴 로그·검색 이벤트 생성은 수행하지 않는다. 기존 저장된 이벤트는 유지한다. 실제 입력을 업로드 MP4로 선택한 경우에는 기존 선택/비교/이벤트 경로를 유지한다.
+
+전체 backend 205건, MariaDB 통합 1건, frontend 19건, Ruff, 타입 검사 및 production build(641.66 kB)가 통과했다. Chrome/CUDA 3개 시험에서 실제 로컬 RTSP 스트림의 사람 이미지·얼굴 기능 비활성화·연결 중단/복구·중지를 확인하고 MP4 독립 FPS/모든 프레임 및 등록 인물 이벤트 경로를 재검증했다. API·worker 서비스 재시작 후 원래 5개 카메라의 중지 상태와 기능 설정 값이 보존되었음을 확인했다. DB migration 변경은 없다.
