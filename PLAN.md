@@ -1097,3 +1097,6 @@ Phase 8→9→10→11을 요청 순서로 구현·실행 검증했으며 Phase�
 
 
 2026-10-05 영상 추적 표시 두께 변경 및 서비스 반영: 원본 프레임에 그리는 사람/얼굴 추적 박스와 얼굴 검출 영역의 선, 추적 번호/점수 글자의 OpenCV thickness를 2에서 1px로 변경했다. 카메라·세션·프레임 안내 글자는 기존 1px를 유지한다. 관련 worker/검출 선택/이미지 처리 시험 16건과 Ruff·diff 검사가 통과했다. worker 서비스에 반영했으며 실행 중인 분석은 없었다.
+
+
+2026-10-06 왼쪽 메뉴 순서 변경: Dashboard → Cameras → Live Search → People → Feature Settings → Logs로 배치하고 기존 메뉴 순서 검증의 마지막 항목을 Logs로 갱신했다. production build와 전체 영어/모바일 페이지 브라우저 시험이 통과했고 frontend 서비스에 반영했다.

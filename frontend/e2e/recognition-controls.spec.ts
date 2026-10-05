@@ -169,7 +169,7 @@ test('Detection and comparison settings, live analysis, photo comparison and log
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.screenshot({path:'../data/screenshots/recognition-logs-mobile.png'});
     const menu = await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button').allTextContents();
-    expect(menu.at(-1)).toContain('People');
+    expect(menu.at(-1)).toContain('Logs');
 
     await page.setViewportSize({width:1600, height:1000});
     await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button', {name:'Feature Settings'}).click();
