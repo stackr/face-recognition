@@ -11,11 +11,11 @@ import cv2
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import ConfigDict, Field, SecretStr
 
 from app.core.config import Settings
 from app.schemas.face_tests import DEFAULT_MIN_FACE_SIZE, FaceTestOptions
-from app.schemas.recognition import face_interval
+from app.schemas.recognition import DetectionSelection, face_interval
 from app.worker.runtime import WorkerRuntime
 
 
@@ -25,7 +25,7 @@ class FaceTestInput(FaceTestOptions):
     filename: str = Field(min_length=1, max_length=200)
 
 
-class StartInput(BaseModel):
+class StartInput(DetectionSelection):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
     source: SecretStr = Field(max_length=2048)
     source_type: Literal["mp4", "rtsp"]
@@ -338,9 +338,24 @@ def create_worker(
                 valid = False
             if not valid:
                 raise HTTPException(422, "Invalid RTSP source")
+        if payload.source_type == "rtsp" and (
+            payload.person_detection_enabled is False or not payload.face_detection_enabled
+        ):
+            raise HTTPException(422, "Detector selection is supported for uploaded MP4")
+        if (
+            payload.person_detection_enabled is None
+            and not settings.person_detection_enabled
+            and not payload.face_detection_enabled
+        ):
+            raise HTTPException(422, "Select at least one detector")
         try:
             return request.app.state.runtime.start(
-                camera_id, source, payload.source_type, payload.loop
+                camera_id,
+                source,
+                payload.source_type,
+                payload.loop,
+                person_detection_enabled=payload.person_detection_enabled,
+                face_detection_enabled=payload.face_detection_enabled,
             )
         except ValueError:
             raise HTTPException(409, "Camera already active") from None

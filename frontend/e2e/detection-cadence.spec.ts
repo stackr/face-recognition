@@ -43,7 +43,7 @@ test('사람·얼굴 독립 FPS, 모든 프레임 검사, 저장·반영·모바
     const personFps = page.getByLabel('사람 검출 빈도 (FPS)', {exact:true});
     const faceFps = page.getByLabel('얼굴 검출 빈도 (FPS)', {exact:true});
     await personAll.uncheck(); await faceAll.uncheck();
-    await page.getByLabel('사람 검출 사용', {exact:true}).check();
+    await expect(page.getByLabel('사람 검출 사용', {exact:true})).toHaveCount(0);
     for (const field of [personFps, faceFps]) {
       await field.fill('0');
       await expect(page.getByRole('button', {name:'설정 저장', exact:true})).toBeDisabled();
@@ -69,7 +69,7 @@ test('사람·얼굴 독립 FPS, 모든 프레임 검사, 저장·반영·모바
       headers:{...headers, 'Content-Type':'video/mp4'}, data:readFileSync(fixture)
     })).status()).toBe(200);
     const analyze = async (personFrames: number, faceFrames: number) => {
-      expect((await page.request.post(`/api/cameras/${cameraId}/start`, {headers, data:{source_type:'mp4', loop:false}})).status()).toBe(200);
+      expect((await page.request.post(`/api/cameras/${cameraId}/start`, {headers, data:{source_type:'mp4', loop:false, person_detection_enabled:true, face_detection_enabled:true}})).status()).toBe(200);
       await expect.poll(async () => (await (await page.request.get(`/api/cameras/${cameraId}/status`)).json()).state, {timeout:45000}).toBe('ended');
       const result = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
       expect(result.actual_device).toMatch(/^cuda(?::\d+)?$/);
@@ -84,6 +84,44 @@ test('사람·얼굴 독립 FPS, 모든 프레임 검사, 저장·반영·모바
     await expect(personFps).toBeDisabled(); await expect(faceFps).toBeEnabled();
     await save();
     await analyze(20, 4);
+    await page.goto(`/#/live/${cameraId}`);
+    const personEnabled = page.getByLabel('사람 검출 사용', {exact:true});
+    const faceEnabled = page.getByLabel('얼굴 검출 사용', {exact:true});
+    const start = page.getByRole('button', {name:'분석 시작', exact:true});
+    await expect(personEnabled).toBeEnabled();
+    await personEnabled.uncheck(); await faceEnabled.uncheck();
+    await expect(start).toBeDisabled();
+    await expect(page.locator('.analysis-detection-options [role="status"]')).toContainText('하나 이상 선택');
+    await personEnabled.check();
+    await page.getByLabel('반복 재생', {exact:true}).uncheck();
+    const personResponse = page.waitForResponse(r => r.url().endsWith(`/api/cameras/${cameraId}/start`) && r.request().method() === 'POST');
+    await start.click();
+    const personRun = await (await personResponse).json();
+    expect(personRun.person_detection_enabled).toBe(true);
+    expect(personRun.face_detection_enabled).toBe(false);
+    await expect(personEnabled).toBeDisabled(); await expect(faceEnabled).toBeDisabled();
+    await expect.poll(async () => (await (await page.request.get(`/api/cameras/${cameraId}/status`)).json()).state).toBe('ended');
+    const peopleOnly = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
+    expect(peopleOnly.face_detection_frames).toBe(0);
+    expect(peopleOnly.face_counts.embeddings_created ?? 0).toBe(0);
+    await expect(personEnabled).toBeEnabled();
+    await personEnabled.uncheck(); await faceEnabled.check();
+    await page.getByLabel('반복 재생', {exact:true}).check();
+    const faceResponse = page.waitForResponse(r => r.url().endsWith(`/api/cameras/${cameraId}/start`) && r.request().method() === 'POST');
+    await start.click();
+    const faceRun = await (await faceResponse).json();
+    expect(faceRun.person_detection_enabled).toBe(false);
+    expect(faceRun.face_detection_enabled).toBe(true);
+    await page.reload();
+    await expect(personEnabled).not.toBeChecked(); await expect(faceEnabled).toBeChecked();
+    await expect(personEnabled).toBeDisabled(); await expect(faceEnabled).toBeDisabled();
+    mkdirSync('../data/screenshots', {recursive:true});
+    await page.locator('.analysis-controls').screenshot({path:'../data/screenshots/live-detection-selection-desktop.png'});
+    await page.setViewportSize({width:390, height:844});
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    await page.locator('.analysis-controls').screenshot({path:'../data/screenshots/live-detection-selection-mobile.png'});
+    await page.getByRole('button', {name:'분석 중지', exact:true}).click();
+    await expect(faceEnabled).toBeEnabled();
     expect(errors).toEqual([]);
   } finally {
     rmSync(fixtureDir, {recursive:true, force:true});

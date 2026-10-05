@@ -32,12 +32,24 @@ class Frame:
 
 class CameraRun:
     def __init__(
-        self, camera_id, source, source_type, loop, settings, actual_device=None, clips=None
+        self,
+        camera_id,
+        source,
+        source_type,
+        loop,
+        settings,
+        actual_device=None,
+        clips=None,
+        *,
+        person_detection_enabled=None,
+        face_detection_enabled=True,
     ):
         self.camera_id, self.source, self.source_type = camera_id, source, source_type
         self.loop, self.settings = loop, settings
         self.actual_device = actual_device
         self.clips = clips
+        self.person_detection_override = person_detection_enabled
+        self.face_detection_enabled = face_detection_enabled
         self.lock = threading.RLock()
         self.cancel = threading.Event()
         self.stream_session_id = uuid.uuid4().hex
@@ -277,10 +289,16 @@ class CameraRun:
             if cap is not None:
                 cap.release()
 
+    @property
+    def person_detection_enabled(self):
+        if self.person_detection_override is not None:
+            return self.person_detection_override
+        return self.source_type != "mp4" or self.settings.person_detection_enabled
+
     def lossless_mp4(self):
         return self.source_type == "mp4" and (
-            (self.settings.person_detection_enabled and self.settings.person_all_frames)
-            or self.settings.face_all_frames
+            (self.person_detection_enabled and self.settings.person_all_frames)
+            or (self.face_detection_enabled and self.settings.face_all_frames)
         )
 
     def fail(self, code):
@@ -297,6 +315,8 @@ class CameraRun:
         with self.lock:
             elapsed = max(0.001, (self.ended_mono or time.monotonic()) - self.created_mono)
             return {
+                "person_detection_enabled": self.person_detection_enabled,
+                "face_detection_enabled": self.face_detection_enabled,
                 "person_detection_frames": self.person_frames,
                 "face_detection_frames": self.face_detection_frames,
                 "all_frames_mode": self.lossless_mp4(),
@@ -437,9 +457,9 @@ class WorkerRuntime:
                     run.next_due = 0
                     run.person_due = run.face_due = None
                     if getattr(run, "source_type", None) == "mp4":
-                        if mode_changed:
+                        if mode_changed and getattr(run, "person_detection_override", None) is None:
                             run.clear_session(rotate=True)
-                        elif criteria_changed and not values.person_detection_enabled:
+                        elif criteria_changed and not run.person_detection_enabled:
                             run.faces = run.result = run.jpeg = None
                     if run.tracker:
                         run.tracker.fps = (
@@ -457,7 +477,16 @@ class WorkerRuntime:
                 )
             self.sampling_revision = revision
 
-    def start(self, camera_id, source, source_type, loop):
+    def start(
+        self,
+        camera_id,
+        source,
+        source_type,
+        loop,
+        *,
+        person_detection_enabled=None,
+        face_detection_enabled=True,
+    ):
         with self.lock:
             previous = self.runs.get(camera_id)
             if previous and (previous.state in ACTIVE or previous.thread.is_alive()):
@@ -475,6 +504,8 @@ class WorkerRuntime:
                 self.settings,
                 self.detector.info["actual_device"],
                 self.clips,
+                person_detection_enabled=person_detection_enabled,
+                face_detection_enabled=face_detection_enabled,
             )
             self.runs[camera_id] = run
             self.runs.move_to_end(camera_id)
@@ -570,10 +601,22 @@ class WorkerRuntime:
                         ):
                             continue
                         frame, run.latest = run.latest, None
-                        rate = max(
-                            self.settings.detection_fps,
-                            1 / max(face_interval(self.settings), 1 / (run.input_fps or 25)),
+                        input_fps = run.input_fps or 25
+                        person_rate = (
+                            (
+                                input_fps
+                                if self.settings.person_all_frames
+                                else self.settings.detection_fps
+                            )
+                            if run.person_detection_enabled
+                            else 0
                         )
+                        face_rate = (
+                            1 / max(face_interval(self.settings), 1 / input_fps)
+                            if run.face_detection_enabled
+                            else 0
+                        )
+                        rate = max(person_rate, face_rate, 0.1)
                         run.next_due = time.monotonic() + 1 / rate
                         person_due, face_due = self.frame_cadence(run, frame)
                     batch.append((run, frame, person_due, face_due))
@@ -584,7 +627,7 @@ class WorkerRuntime:
                     person_indices = [
                         index
                         for index, (run, _, person_due, _) in enumerate(batch)
-                        if person_due and not self.uploaded_face_mode(run)
+                        if person_due and run.person_detection_enabled
                     ]
                     images = [batch[index][1].image for index in person_indices]
                     boxes = [None] * len(batch)
@@ -624,7 +667,9 @@ class WorkerRuntime:
                                 person_due and not self.uploaded_face_mode(run)
                             )
                             run.face_detection_frames += int(
-                                face_due and self.face_analyzer is not None
+                                face_due
+                                and self.face_analyzer is not None
+                                and run.face_detection_enabled
                             )
             self.cancel.wait(0.005)
 
@@ -642,7 +687,7 @@ class WorkerRuntime:
 
     def uploaded_face_mode(self, run):
         # This new identity-comparison path is only for user-uploaded recordings.
-        return run.source_type == "mp4" and not self.settings.person_detection_enabled
+        return run.source_type == "mp4" and not run.person_detection_enabled
 
     def frame_cadence(self, run, frame):
         clock = frame.video_seconds if frame.video_seconds is not None else frame.captured_mono
@@ -666,7 +711,14 @@ class WorkerRuntime:
                     )
                 else:
                     setattr(run, name, clock)
-            due.append(ready)
+            due.append(
+                ready
+                and (
+                    run.person_detection_enabled
+                    if name == "person_due"
+                    else run.face_detection_enabled
+                )
+            )
         return tuple(due)
 
     def process_frame(self, run, frame, boxes, detection_ms, *, face_due=None):
@@ -731,13 +783,13 @@ class WorkerRuntime:
                 faces = run.faces
             face_start = direct_start if direct else time.monotonic()
             face_counts = Counter()
-            if self.face_analyzer is not None:
+            if self.face_analyzer is not None and run.face_detection_enabled:
                 face_counts = faces.process(analyzer, frame, tracks, live_ids, inspect_due=face_due)
             face_process_ms = (time.monotonic() - face_start) * 1000
             search_start = time.monotonic()
             gallery_revision = None
             search_status = "disabled"
-            if self.gallery is not None:
+            if self.gallery is not None and run.face_detection_enabled:
                 try:
                     gallery_revision = faces.match(self.gallery, tracks)
                     search_status = "ready"
@@ -818,7 +870,7 @@ class WorkerRuntime:
                         gallery_revision,
                         time.monotonic(),
                     )
-                if self.diagnostics is not None:
+                if self.diagnostics is not None and run.face_detection_enabled:
                     self.diagnostics.submit_tracks(
                         run.camera_id,
                         frame.stream_session_id,
@@ -834,11 +886,14 @@ class WorkerRuntime:
                     "tracks": tracks,
                     "gallery_revision": gallery_revision,
                     "search_status": search_status,
+                    "person_detection_enabled": run.person_detection_enabled,
+                    "face_detection_enabled": run.face_detection_enabled,
                     "detection_confidence": self.settings.detection_confidence,
                     "detection_mode": "face" if direct else "person",
                     "person_detection_performed": boxes is not None and not direct,
                     "face_detection_performed": face_due is not False
-                    and self.face_analyzer is not None,
+                    and self.face_analyzer is not None
+                    and run.face_detection_enabled,
                     "person_all_frames": self.settings.person_all_frames,
                     "face_all_frames": self.settings.face_all_frames,
                     "person_detection_fps": self.settings.detection_fps,

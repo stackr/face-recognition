@@ -33,6 +33,7 @@ interface FaceStatus {
 interface AnalysisTrack {track_id: number; confidence: number; face?: FaceStatus; reid?: {status: string; embedding_ready: boolean; identity_assignment?: boolean};}
 interface AnalysisStatus {
   camera_id: number; state: string; error_code?: string; source_type?: string; stream_session_id?: string;
+  person_detection_enabled?: boolean; face_detection_enabled?: boolean;
   person_detection_fps?: number; face_detection_fps?: number;
   detection_fps?: number; capture_fps?: number; processed_frames?: number; dropped_frames?: number;
   latency_p95_ms?: number; resolution?: number[]; result?: {tracks: AnalysisTrack[]; detection_confidence?: number; detection_mode?: string; face_detection_threshold?: number; min_face_size?: number};
@@ -99,6 +100,27 @@ export class AppComponent implements OnDestroy {
   previewVersion = signal(0);
   analysisSource: 'rtsp' | 'mp4' = 'rtsp';
   loopVideo = true;
+  analysisPersonEnabled = true;
+  analysisFaceEnabled = true;
+  private detectionChoices = new Map<number, {person: boolean; face: boolean}>();
+  detectionSelectionChanged() {
+    const id = this.selectedCamera()?.camera_id;
+    if (id !== undefined) this.detectionChoices.set(id, {person:this.analysisPersonEnabled, face:this.analysisFaceEnabled});
+  }
+  private loadDetectionSelection(id: number) {
+    const choice = this.detectionChoices.get(id);
+    this.analysisPersonEnabled = choice?.person ?? true;
+    this.analysisFaceEnabled = choice?.face ?? true;
+    if (choice) return;
+    const version = this.liveVersion;
+    this.http.get<{values:{person_detection_enabled:boolean}}>('/api/function-settings').pipe(timeout(12000)).subscribe({
+      next: settings => {
+        if (version !== this.liveVersion || this.selectedCamera()?.camera_id !== id || this.detectionChoices.has(id) || this.activeAnalysis() || this.busy()) return;
+        this.analysisPersonEnabled = settings.values.person_detection_enabled;
+        this.analysisFaceEnabled = true;
+      }, error: err => {if (err.status === 401 && version === this.liveVersion) this.clearSession();}
+    });
+  }
   private statusPending = false;
   private pollTimer = window.setInterval(() => {
     if (this.user() && this.selectedCamera() && this.view() === 'live') this.refreshAnalysis();
@@ -203,7 +225,7 @@ export class AppComponent implements OnDestroy {
     });
   }
 
-  clearSession() { this.sessionVersion++; this.liveVersion++; this.statusPending = false; this.camerasLoaded = false; this.resetPersonEditor(); this.user.set(null); this.csrf = ''; this.cameras.set([]); this.persons.set([]); this.status.set(null); this.selectedCamera.set(null); this.analysis.set(null); this.error.set(''); this.notice.set(''); }
+  clearSession() { this.detectionChoices.clear(); this.analysisPersonEnabled = this.analysisFaceEnabled = true; this.sessionVersion++; this.liveVersion++; this.statusPending = false; this.camerasLoaded = false; this.resetPersonEditor(); this.user.set(null); this.csrf = ''; this.cameras.set([]); this.persons.set([]); this.status.set(null); this.selectedCamera.set(null); this.analysis.set(null); this.error.set(''); this.notice.set(''); }
 
   handleError(err: HttpErrorResponse) {
     if (err.status === 401) { this.clearSession(); this.error.set('세션이 만료되었습니다. 다시 로그인해 주세요.'); }
@@ -408,6 +430,7 @@ export class AppComponent implements OnDestroy {
       this.liveVersion++; this.statusPending = false;
       this.selectedCamera.set(camera); this.analysis.set(null); this.previewFailed.set(false);
       this.analysisSource = camera.source_type;
+      this.loadDetectionSelection(camera.camera_id);
     }
     this.refreshAnalysis();
   }
@@ -430,6 +453,11 @@ export class AppComponent implements OnDestroy {
           }
           if (value.state === 'running' && previous?.state !== 'running') this.previewFailed.set(false);
           this.analysis.set(value);
+          if ((this.activeAnalysis() || !this.detectionChoices.has(camera.camera_id)) && value.person_detection_enabled !== undefined && value.face_detection_enabled !== undefined) {
+            this.analysisPersonEnabled = value.person_detection_enabled;
+            this.analysisFaceEnabled = value.face_detection_enabled;
+            this.detectionSelectionChanged();
+          }
           if (this.activeAnalysis() && (value.source_type === 'mp4' || value.source_type === 'rtsp')) {
             this.analysisSource = value.source_type; this.loopVideo = value.loop ?? this.loopVideo;
           }
@@ -446,9 +474,10 @@ export class AppComponent implements OnDestroy {
   }
   activeAnalysis() { return ['opening', 'running', 'reconnecting', 'draining', 'stopping'].includes(this.analysis()?.state || ''); }
   startAnalysis() {
-    const camera = this.selectedCamera(); if (!camera?.can_operate || this.busy()) return;
+    const camera = this.selectedCamera(); if (!camera?.can_operate || this.busy() || this.activeAnalysis() || (this.analysisSource === 'mp4' && !this.analysisPersonEnabled && !this.analysisFaceEnabled)) return;
+    this.detectionSelectionChanged();
     this.busy.set(true); this.error.set(''); this.notice.set(''); this.previewFailed.set(false);
-    this.http.post<AnalysisStatus>(`/api/cameras/${camera.camera_id}/start`, {source_type:this.analysisSource, loop:this.loopVideo}, {headers:this.headers()})
+    this.http.post<AnalysisStatus>(`/api/cameras/${camera.camera_id}/start`, {source_type:this.analysisSource, loop:this.loopVideo, person_detection_enabled:this.analysisSource === 'mp4' ? this.analysisPersonEnabled : true, face_detection_enabled:this.analysisSource === 'mp4' ? this.analysisFaceEnabled : true}, {headers:this.headers()})
       .pipe(timeout(15000)).subscribe({
         next: value => { this.analysis.set(value); this.previewVersion.update(value => value + 1); this.busy.set(false); this.refreshAnalysis(); },
         error: err => { this.busy.set(false); this.handleError(err); }

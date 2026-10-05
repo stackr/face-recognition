@@ -52,3 +52,14 @@ class SamplingUpdate(SamplingSettings):
     face_match_threshold: float = Field(ge=-1, le=1)
     detection_confidence: float = Field(ge=0, le=1)
     revision: int = Field(ge=0)
+
+
+class DetectionSelection(BaseModel):
+    person_detection_enabled: bool | None = Field(default=None, strict=True)
+    face_detection_enabled: bool = Field(default=True, strict=True)
+
+    @model_validator(mode="after")
+    def require_detection(self):
+        if self.person_detection_enabled is False and not self.face_detection_enabled:
+            raise ValueError("Select at least one detector")
+        return self

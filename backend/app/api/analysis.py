@@ -19,7 +19,9 @@ from app.api.dependencies import admin_user, current_user, operator_user
 from app.api.persons import filter_camera_status
 from app.db.session import get_db
 from app.models import AuditLog, CameraPermission, User
+from app.schemas.recognition import DetectionSelection
 from app.services.camera_operations import camera_mutation
+from app.services.recognition import load_sampling
 
 router = APIRouter(prefix="/api/cameras", tags=["Analysis"])
 
@@ -71,7 +73,7 @@ def set_access(
     }
 
 
-class StartInput(BaseModel):
+class StartInput(DetectionSelection):
     model_config = ConfigDict(extra="forbid")
     source_type: Literal["rtsp", "mp4"] | None = None
     loop: bool = True
@@ -110,6 +112,14 @@ def start(
         raise HTTPException(409, "Camera disabled")
     settings = request.app.state.settings
     source_type = payload.source_type or camera.source_type
+    if source_type == "rtsp" and (
+        payload.person_detection_enabled is False or not payload.face_detection_enabled
+    ):
+        raise HTTPException(422, "Detector selection is supported for uploaded MP4")
+    if not payload.face_detection_enabled:
+        _, controls = load_sampling(db, settings)
+        if payload.person_detection_enabled is None and not controls.person_detection_enabled:
+            raise HTTPException(422, "Select at least one detector")
     if source_type == "mp4":
         if not camera.video_path:
             raise HTTPException(409, "Upload a test MP4 first")
@@ -125,7 +135,13 @@ def start(
     response = request.app.state.worker.request(
         "POST",
         f"/internal/cameras/{camera_id}/start",
-        json={"source": source, "source_type": source_type, "loop": payload.loop},
+        json={
+            "source": source,
+            "source_type": source_type,
+            "loop": payload.loop,
+            "person_detection_enabled": payload.person_detection_enabled,
+            "face_detection_enabled": payload.face_detection_enabled,
+        },
     )
     try:
         audit(db, user, camera_id, "camera.start")

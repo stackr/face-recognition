@@ -40,6 +40,8 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
     const before = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
     await page.getByRole('navigation', {name:'주 메뉴'}).getByRole('button', {name:'기능 설정'}).click();
     await expect(page.getByRole('heading', {name:'기능 설정', exact:true})).toBeVisible();
+    await page.getByLabel('사람 검출 · 모든 프레임 검사', {exact:true}).uncheck();
+    await page.getByLabel('얼굴 검출 · 모든 프레임 검사', {exact:true}).uncheck();
     await page.getByLabel('얼굴 검출 빈도 (FPS)', {exact:true}).fill('0');
     await expect(page.getByRole('button', {name:'설정 저장', exact:true})).toBeDisabled();
     await page.getByLabel('얼굴 검출 빈도 (FPS)', {exact:true}).fill('5');
@@ -63,7 +65,7 @@ test('기능 설정·사람 검출·비교점수 즉시 반영, Live Search·사
     await expect(page.locator('app-function-settings').getByRole('status')).toContainText('설정을 저장');
     await expect(page.locator('.settings-state')).toContainText('반영 완료');
     const configured = await (await page.request.get('/api/function-settings')).json();
-    expect(configured.values).toEqual({...originalValues, detection_fps:8, face_detection_fps:5, face_rois_per_frame:6, face_match_threshold:0.7, detection_confidence:0.2});
+    expect(configured.values).toEqual({...originalValues, detection_fps:8, face_detection_fps:5, person_all_frames:false, face_all_frames:false, face_rois_per_frame:6, face_match_threshold:0.7, detection_confidence:0.2});
     expect(configured.applied).toBe(true);
     const after = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
     expect(after.stream_session_id).toBe(before.stream_session_id);

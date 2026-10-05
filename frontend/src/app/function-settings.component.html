@@ -4,7 +4,7 @@
   <section class="card settings-state">
     <div><h2>분석 설정 반영 상태</h2><span class="badge" [class.text-bg-success]="settings.applied && !saving()" [class.text-bg-warning]="!settings.applied || saving()">{{ saving() ? '저장 및 반영 중' : settings.applied ? '반영 완료' : settings.active ? '반영 대기' : '분석 서비스 연결 대기' }}</span></div>
     <p>사람과 얼굴의 검출 빈도를 각각 설정할 수 있습니다. 업로드 영상의 검출 방식과 얼굴 검출 조건은 MP4에 적용되며, 저장값은 서비스 재시작 후에도 유지됩니다.</p>
-    @if (settings.active; as active) {<small>업로드 영상 사람 검출 {{ active.values.person_detection_enabled ? '사용' : '사용 안 함 · 얼굴 직접 검출' }} · 얼굴 검출 기준 {{ active.values.video_face_detection_threshold | number:'1.2-2' }} · 최소 {{ active.values.video_face_min_size }} px<br>현재 적용: 사람 검출 기준 {{ active.values.detection_confidence | number:'1.2-4' }} · 사람 검출 {{ active.values.person_all_frames ? '모든 프레임' : active.values.detection_fps + ' FPS' }} · 얼굴 검출 {{ active.values.face_all_frames ? '모든 프레임' : active.values.face_detection_fps + ' FPS' }} · 프레임당 최대 {{ active.values.face_rois_per_frame }}명 · 비교점수 기준 {{ active.values.face_match_threshold | number:'1.2-4' }}</small>}
+    @if (settings.active; as active) {<small>얼굴 검출 기준 {{ active.values.video_face_detection_threshold | number:'1.2-2' }} · 최소 {{ active.values.video_face_min_size }} px<br>현재 적용: 사람 검출 기준 {{ active.values.detection_confidence | number:'1.2-4' }} · 사람 검출 {{ active.values.person_all_frames ? '모든 프레임' : active.values.detection_fps + ' FPS' }} · 얼굴 검출 {{ active.values.face_all_frames ? '모든 프레임' : active.values.face_detection_fps + ' FPS' }} · 프레임당 최대 {{ active.values.face_rois_per_frame }}명 · 비교점수 기준 {{ active.values.face_match_threshold | number:'1.2-4' }}</small>}
   </section>
   <form class="card function-settings-form" #form="ngForm" (ngSubmit)="save(form)">
     <h2>검출 기준·검사 빈도와 비교 기준</h2>
@@ -12,8 +12,7 @@
     <fieldset [disabled]="!canEdit || saving() || loading()">
       <section class="settings-group" aria-labelledby="person-settings-title">
         <h3 id="person-settings-title">사람 검출</h3>
-      <label class="form-check mb-4"><input id="person-detection-enabled" name="person-detection-enabled" type="checkbox" class="form-check-input" [(ngModel)]="values.person_detection_enabled" (ngModelChange)="changed()"><span class="form-check-label">사람 검출 사용</span></label>
-      <p class="settings-help">업로드한 MP4에 적용됩니다. 체크를 끄면 사람 검출을 거치지 않고 전체 화면에서 얼굴을 찾은 후 등록 인물과 비교합니다. 모드를 바꾸면 업로드 영상의 추적 세션을 새로 시작합니다. RTSP 입력의 처리 방식은 변경되지 않습니다.</p>
+        <p class="settings-help">사용할 검출 기능은 Live Search의 [분석 시작] 버튼 위에서 선택합니다. 이 화면에서는 검출 빈도와 기준을 설정합니다.</p>
         <label class="form-check mb-3"><input id="person-all-frames" name="person-all-frames" type="checkbox" class="form-check-input" [(ngModel)]="values.person_all_frames" (ngModelChange)="changed()"><span class="form-check-label">사람 검출 · 모든 프레임 검사</span></label>
         <div class="settings-fields">
         <div><label class="form-label" for="detection-fps">사람 검출 빈도 (FPS)</label><input id="detection-fps" name="detection-fps" type="number" class="form-control" [(ngModel)]="values.detection_fps" (ngModelChange)="changed()" min="1" max="240" step="0.5" [disabled]="values.person_all_frames" required><small>1~240 FPS. 모든 프레임 검사를 체크하면 원본 영상의 모든 프레임에서 검출합니다.</small></div>
@@ -25,7 +24,7 @@
         <label class="form-check mb-3"><input id="face-all-frames" name="face-all-frames" type="checkbox" class="form-check-input" [(ngModel)]="values.face_all_frames" (ngModelChange)="changed()"><span class="form-check-label">얼굴 검출 · 모든 프레임 검사</span></label>
         <div class="settings-fields">
           <div><label class="form-label" for="face-detection-fps">얼굴 검출 빈도 (FPS)</label><input id="face-detection-fps" name="face-detection-fps" type="number" class="form-control" [(ngModel)]="values.face_detection_fps" (ngModelChange)="changed()" [disabled]="values.face_all_frames" min="0.1" max="240" step="0.1" required><small>0.1~240 FPS. 사람 검출 빈도와 독립적으로 적용됩니다. 모든 프레임 검사를 체크하면 FPS 제한을 사용하지 않습니다.</small></div>
-        <div><label class="form-label" for="video-face-detection-threshold">얼굴 검출 기준</label><input id="video-face-detection-threshold" name="video-face-detection-threshold" type="number" class="form-control" [(ngModel)]="values.video_face_detection_threshold" (ngModelChange)="changed()" min="0.1" max="0.99" step="0.01" required><small>0.10~0.99. 얼굴 검출 테스트와 동일한 검출 기준입니다. 사람 검출을 끈 업로드 영상에 적용됩니다.</small></div>
+        <div><label class="form-label" for="video-face-detection-threshold">얼굴 검출 기준</label><input id="video-face-detection-threshold" name="video-face-detection-threshold" type="number" class="form-control" [(ngModel)]="values.video_face_detection_threshold" (ngModelChange)="changed()" min="0.1" max="0.99" step="0.01" required><small>0.10~0.99. 얼굴 검출 테스트와 동일한 검출 기준입니다. Live Search에서 사람 검출을 선택하지 않은 업로드 영상에 적용됩니다.</small></div>
         <div><label class="form-label" for="video-face-min-size">최소 얼굴 크기 (px)</label><input id="video-face-min-size" name="video-face-min-size" type="number" class="form-control" [(ngModel)]="values.video_face_min_size" (ngModelChange)="changed()" min="8" max="512" step="1" required><small>8~512 px 정수. 원본 얼굴 영역의 짧은 변을 기준으로 합니다. 얼굴 검출 테스트와 같은 조건이며 각 화면의 값은 별도로 저장됩니다.</small></div>
         <div><label class="form-label" for="face-budget">프레임당 최대 얼굴 검사 인원</label><input id="face-budget" name="face-budget" type="number" class="form-control" [(ngModel)]="values.face_rois_per_frame" (ngModelChange)="changed()" min="1" max="16" step="1" required><small>1~16명. 여러 사람이 있을 때 대기 순서에 따라 검사합니다.</small></div>
         </div>

@@ -49,7 +49,7 @@ test('업로드 MP4 얼굴 직접 검출, 등록 인물 이벤트, 기준 변경
       headers:{...headers, 'Content-Type':'video/mp4'}, data:readFileSync('../data/videos/face-smoke.mp4')
     })).status()).toBe(200);
     await settingsPage();
-    await page.getByLabel('사람 검출 사용', {exact:true}).uncheck();
+    await expect(page.getByLabel('사람 검출 사용', {exact:true})).toHaveCount(0);
     const cutoff = page.getByLabel('얼굴 검출 기준', {exact:true});
     const size = page.getByLabel('최소 얼굴 크기 (px)', {exact:true});
     await cutoff.fill('1');
@@ -60,18 +60,23 @@ test('업로드 MP4 얼굴 직접 검출, 등록 인물 이벤트, 기준 변경
     await size.fill('32.5');
     await expect(page.getByRole('button', {name:'설정 저장', exact:true})).toBeDisabled();
     await size.fill('32');
+    await page.getByLabel('사람 검출 · 모든 프레임 검사', {exact:true}).uncheck();
+    await page.getByLabel('얼굴 검출 · 모든 프레임 검사', {exact:true}).uncheck();
     await page.getByLabel('얼굴 검출 빈도 (FPS)', {exact:true}).fill('5');
     await page.getByLabel('사람 검출 빈도 (FPS)', {exact:true}).fill('5');
     await page.getByLabel('비교점수 기준', {exact:true}).fill('0.7');
     await save();
     await page.reload();
-    await expect(page.getByLabel('사람 검출 사용', {exact:true})).not.toBeChecked();
+    await expect(page.getByLabel('사람 검출 사용', {exact:true})).toHaveCount(0);
     await expect(cutoff).toHaveValue('0.5');
     await expect(size).toHaveValue('32');
     await page.setViewportSize({width:390, height:844});
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await page.setViewportSize({width:1600, height:1000});
     await page.goto(`/#/live/${cameraId}`);
+    await expect(page.getByLabel('사람 검출 사용', {exact:true})).toBeEnabled();
+    await page.getByLabel('사람 검출 사용', {exact:true}).uncheck();
+    await page.getByLabel('얼굴 검출 사용', {exact:true}).check();
     await page.getByRole('button', {name:'분석 시작', exact:true}).click();
     await expect.poll(async () => (await state()).result?.detection_mode).toBe('face');
     await expect.poll(async () => (await state()).result?.tracks.length).toBe(2);
@@ -112,8 +117,11 @@ test('업로드 MP4 얼굴 직접 검출, 등록 인물 이벤트, 기준 변경
     await cutoff.fill('0.5');
     await save();
     await expect.poll(async () => (await state()).result?.tracks.length).toBe(2);
+    await page.goto(`/#/live/${cameraId}`);
+    await page.getByRole('button', {name:'분석 중지', exact:true}).click();
+    await expect(page.getByLabel('사람 검출 사용', {exact:true})).toBeEnabled();
     await page.getByLabel('사람 검출 사용', {exact:true}).check();
-    await save();
+    await page.getByRole('button', {name:'분석 시작', exact:true}).click();
     await expect.poll(async () => (await state()).result?.detection_mode).toBe('person');
     expect((await state()).stream_session_id).not.toBe(session);
     expect(errors).toEqual([]);
