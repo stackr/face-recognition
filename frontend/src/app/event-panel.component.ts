@@ -1,6 +1,6 @@
 import {CommonModule} from '@angular/common';
 import {HttpClient} from '@angular/common/http';
-import {Component, DestroyRef, EventEmitter, Input, OnDestroy, OnInit, Output, computed, inject, signal} from '@angular/core';
+import {Component, DestroyRef, ElementRef, EventEmitter, Input, OnDestroy, OnInit, Output, ViewChild, computed, inject, signal} from '@angular/core';
 import {takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {FormsModule} from '@angular/forms';
 import {firstValueFrom, timeout} from 'rxjs';
@@ -221,7 +221,7 @@ export class EventFeed {
                 </details>
               }
               <div class="event-actions">
-                @if (event.frame_url) {<a [href]="event.frame_url" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary">검출 프레임</a>}
+                @if (event.frame_url) {<button type="button" (click)="openFrame(event)" class="btn btn-sm btn-outline-secondary">검출 프레임</button>}
                 @if (event.can_review) {
                   <button class="btn btn-sm btn-outline-primary" (click)="review(event, 'confirm')" [disabled]="reviewing() || deleting() || event.status === 'confirmed'">확인</button>
                   <button class="btn btn-sm btn-outline-danger" (click)="review(event, 'reject')" [disabled]="reviewing() || deleting() || event.status === 'rejected'">거부</button>
@@ -233,11 +233,22 @@ export class EventFeed {
         } @empty {<div class="event-empty">{{ events().length ? '조건에 맞는 이벤트가 없습니다. 필터를 변경해 주세요.' : '저장된 검색 후보가 없습니다. 분석 중 품질과 유사도 기준을 통과하면 표시됩니다.' }}</div>}
       </div>
       <small class="face-note">권한이 있는 최근 100건 안에서 필터링합니다. 등록 얼굴은 현재 사진이며 검출 당시의 등록 사진과 다를 수 있습니다. 검색 후보는 동일인 확정이 아닙니다.</small>
-    </section>`
+    </section>
+    <dialog #frameDialog class="event-frame-dialog" aria-labelledby="event-frame-title" (click)="frameBackdrop($event)" (cancel)="closeFrame()" (close)="frameClosed()">
+      <div class="event-frame-content">
+        <div class="event-frame-heading"><h2 id="event-frame-title">검출 프레임</h2><button type="button" class="btn btn-outline-secondary" autofocus (click)="closeFrame()" aria-label="검출 프레임 닫기">닫기</button></div>
+        @if (frameEvent(); as event) {
+          <p class="event-frame-caption">{{ event.person_name }} · {{ event.camera_name }} · 추적 #{{ event.track_id }} · {{ event.timestamp | date:'yyyy-MM-dd HH:mm:ss' }}</p>
+          @if (frameLoading()) {<p class="event-frame-message" role="status">검출 프레임을 불러오고 있습니다.</p>}
+          @if (frameError()) {<p class="alert alert-warning" role="alert">검출 프레임을 불러오지 못했습니다. 이미지가 만료되었거나 접근 권한이 변경되었을 수 있습니다.</p>}
+          <img class="event-frame-image" [class.d-none]="frameLoading() || frameError()" [src]="event.frame_url" [alt]="event.person_name + ' 검색 이벤트 검출 프레임'" (load)="frameLoading.set(false)" (error)="frameError.set(true); frameLoading.set(false)">
+        }
+      </div>
+    </dialog>`
 })
 export class EventPanelComponent implements OnInit, OnDestroy {
   @Input() requestHeaders: Record<string, string> = {};
-  @Input() set selectedCameraId(value: number | null) {this.cameraId.set(value);}
+  @Input() set selectedCameraId(value: number | null) {if (this.cameraId() !== value) this.closeFrame(); this.cameraId.set(value);}
   @Input() set references(value: ReferencePerson[]) {this.persons.set(value);}
   @Output() sessionExpired = new EventEmitter<void>();
   private http = inject(HttpClient);
@@ -253,10 +264,29 @@ export class EventPanelComponent implements OnInit, OnDestroy {
   error = signal('');
   reviewing = signal(false);
   deleting = signal(false);
+  frameEvent = signal<MatchEvent | null>(null);
+  frameLoading = signal(false);
+  frameError = signal(false);
+  @ViewChild('frameDialog', {static:true}) private frameDialog!: ElementRef<HTMLDialogElement>;
   private feed = new EventFeed(path => firstValueFrom(this.http.get<EventPage>(path).pipe(timeout(8000))),
-    rows => this.events.set(rows), label => this.connection.set(label), () => this.sessionExpired.emit());
+    rows => {
+      this.events.set(rows);
+      const frame = this.frameEvent();
+      if (frame && !rows.some(row => row.event_id === frame.event_id && row.frame_url)) this.closeFrame();
+    }, label => this.connection.set(label), () => this.sessionExpired.emit());
   ngOnInit() {this.feed.start();}
-  ngOnDestroy() {this.feed.stop();}
+  ngOnDestroy() {this.closeFrame(); this.feed.stop();}
+  openFrame(event: MatchEvent) {
+    if (!event.frame_url) return;
+    this.frameLoading.set(true); this.frameError.set(false); this.frameEvent.set(event);
+    this.frameDialog.nativeElement.showModal();
+  }
+  closeFrame() {this.frameDialog?.nativeElement.close(); this.frameClosed();}
+  frameClosed() {
+    if (this.frameDialog?.nativeElement.open) return;
+    this.frameEvent.set(null); this.frameLoading.set(false); this.frameError.set(false);
+  }
+  frameBackdrop(event: MouseEvent) {if (event.target === this.frameDialog.nativeElement) this.closeFrame();}
   setFilter(key: keyof EventFilters, value: string) {this.filters.update(filters => ({...filters, [key]: value}));}
   resetFilters() {this.filters.set({camera: 'selected', person: '', status: 'all'});}
   imageFailed(url: string) {this.failedImages.update(values => new Set([...values, url].slice(-256)));}
