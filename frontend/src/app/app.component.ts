@@ -64,6 +64,8 @@ export class AppComponent implements OnDestroy {
   controlsRefresh = signal(0);
   status = signal<SystemStatus | null>(null);
   cameras = signal<Camera[]>([]);
+  dashboardStatuses = signal<Record<number, AnalysisStatus>>({});
+  private dashboardPendingSession: number | null = null;
   viewableCameras = computed(() => this.cameras().filter(camera => camera.can_view));
   private camerasLoaded = false;
   private liveRouteId: number | null = null;
@@ -126,9 +128,12 @@ export class AppComponent implements OnDestroy {
     if (this.user() && this.selectedCamera() && this.view() === 'live') this.refreshAnalysis();
   }, 2000);
   private metadataTimer = window.setInterval(() => {
-    if (this.user() && this.view() === 'live') this.refresh();
+    if (this.user() && (this.view() === 'live' || this.view() === 'dashboard')) this.refresh();
   }, 30000);
-  ngOnDestroy() { window.clearInterval(this.pollTimer); window.clearInterval(this.metadataTimer); window.removeEventListener('hashchange', this.routeChanged); }
+  private dashboardTimer = window.setInterval(() => {
+    if (this.user() && this.view() === 'dashboard') void this.refreshDashboardStatuses();
+  }, 10000);
+  ngOnDestroy() { window.clearInterval(this.dashboardTimer); window.clearInterval(this.pollTimer); window.clearInterval(this.metadataTimer); window.removeEventListener('hashchange', this.routeChanged); }
 
   constructor() {
     window.addEventListener('hashchange', this.routeChanged);
@@ -191,6 +196,7 @@ export class AppComponent implements OnDestroy {
       this.view.set(live ? 'live' : path === 'persons' || path === 'cameras' || path === 'logs' || path === 'settings' || path === 'face-test' ? path : 'dashboard');
       if (path === 'persons') this.refreshPersons();
       if (path === 'logs') this.refresh();
+      if (this.view() === 'dashboard' && this.camerasLoaded) this.refresh();
       if (live && this.camerasLoaded) {
         // A camera may have been added in another tab since this list was loaded.
         if (this.liveRouteId === null || this.viewableCameras().some(camera => camera.camera_id === this.liveRouteId)) {
@@ -225,7 +231,7 @@ export class AppComponent implements OnDestroy {
     });
   }
 
-  clearSession() { this.detectionChoices.clear(); this.analysisPersonEnabled = this.analysisFaceEnabled = true; this.sessionVersion++; this.liveVersion++; this.statusPending = false; this.camerasLoaded = false; this.resetPersonEditor(); this.user.set(null); this.csrf = ''; this.cameras.set([]); this.persons.set([]); this.status.set(null); this.selectedCamera.set(null); this.analysis.set(null); this.error.set(''); this.notice.set(''); }
+  clearSession() { this.dashboardStatuses.set({}); this.dashboardPendingSession = null; this.detectionChoices.clear(); this.analysisPersonEnabled = this.analysisFaceEnabled = true; this.sessionVersion++; this.liveVersion++; this.statusPending = false; this.camerasLoaded = false; this.resetPersonEditor(); this.user.set(null); this.csrf = ''; this.cameras.set([]); this.persons.set([]); this.status.set(null); this.selectedCamera.set(null); this.analysis.set(null); this.error.set(''); this.notice.set(''); }
 
   handleError(err: HttpErrorResponse) {
     if (err.status === 401) { this.clearSession(); this.error.set('세션이 만료되었습니다. 다시 로그인해 주세요.'); }
@@ -251,10 +257,43 @@ export class AppComponent implements OnDestroy {
           if (!this.selectedCamera()) this.analysis.set(null);
         }
         if (this.view() === 'live') this.restoreLiveCamera();
+        if (this.view() === 'dashboard') void this.refreshDashboardStatuses();
       }, error: err => {if (version === this.sessionVersion) this.handleError(err);}
     });
   }
 
+  async refreshDashboardStatuses() {
+    const version = this.sessionVersion;
+    if (!this.user() || this.dashboardPendingSession !== null) return;
+    this.dashboardPendingSession = version;
+    const queue = this.cameras().filter(camera => camera.can_view);
+    const states: Record<number, AnalysisStatus> = {};
+    try {
+      await Promise.all(Array.from({length: Math.min(4, queue.length)}, async () => {
+        while (queue.length && version === this.sessionVersion && this.view() === 'dashboard') {
+          const camera = queue.shift()!;
+          try {
+            states[camera.camera_id] = await firstValueFrom(this.http.get<AnalysisStatus>(
+              `/api/cameras/${camera.camera_id}/status`).pipe(timeout(12000)));
+          } catch (err) {
+            const status = (err as HttpErrorResponse).status;
+            if (status === 401 && version === this.sessionVersion) { this.clearSession(); return; }
+            states[camera.camera_id] = {camera_id: camera.camera_id, state: status === 403 ? 'forbidden' : 'unavailable'};
+          }
+        }
+      }));
+      if (version === this.sessionVersion && this.user() && this.view() === 'dashboard') this.dashboardStatuses.set(states);
+    } finally {
+      if (this.dashboardPendingSession === version) this.dashboardPendingSession = null;
+    }
+  }
+
+  dashboardState(camera: Camera) {
+    return camera.can_view ? (this.dashboardStatuses()[camera.camera_id]?.state ?? '') : 'forbidden';
+  }
+  dashboardPeople(state: AnalysisStatus) {
+    return state.result ? (state.result.person_tracks?.length ?? (state.result.detection_mode === 'person' ? state.result.tracks.length : 0)) : null;
+  }
   refreshPage() {
     if (this.busy()) return;
     if (this.view() === 'logs' || this.view() === 'settings' || this.view() === 'face-test') {if (this.view() === 'logs') this.refresh(); this.controlsRefresh.update(value => value + 1); return;}
@@ -524,9 +563,9 @@ export class AppComponent implements OnDestroy {
   }
   previewUrl() { return `/api/cameras/${this.selectedCamera()?.camera_id}/preview?v=${this.previewVersion()}`; }
   reconnectPreview() { this.previewFailed.set(false); this.previewVersion.update(value => value + 1); }
-  analysisLabel() {
-    const labels: Record<string,string> = {stopped:'중지됨', opening:'영상 연결 중', running:'분석 중', reconnecting:'자동 재연결 중', draining:'마지막 프레임 처리 중', stopping:'중지 중', ended:'영상 재생 완료', error:'연결 또는 분석 실패'};
-    return labels[this.analysis()?.state || ''] || '상태 확인 중';
+  analysisLabel(state: string | undefined = this.analysis()?.state) {
+    const labels: Record<string,string> = {stopped:'중지됨', opening:'영상 연결 중', running:'분석 중', reconnecting:'자동 재연결 중', draining:'마지막 프레임 처리 중', stopping:'중지 중', ended:'영상 재생 완료', error:'연결 또는 분석 실패', unavailable:'상태 조회 실패', forbidden:'조회 권한 없음'};
+    return labels[state || ''] || '상태 확인 중';
   }
   analysisError() {
     if (this.analysis()?.state === 'reconnecting') return '';
