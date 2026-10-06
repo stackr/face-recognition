@@ -210,7 +210,7 @@ export class AppComponent implements OnDestroy {
   pageTitle() {
     if (this.view() === 'person-editor') return this.user()?.role === 'admin'
       ? (this.personEditingId === null ? 'Add Person' : 'Edit Person') : 'Person Details';
-    return {dashboard:'System Readiness', cameras:'Cameras', persons:'People', live:'Live Search', logs:'Logs', settings:'Feature Settings', 'face-test':'Face Detection Test'}[this.view() as 'dashboard' | 'cameras' | 'persons' | 'live' | 'logs' | 'settings' | 'face-test'];
+    return {dashboard:'System Readiness', cameras:'Cameras', persons:'People', live:'Live Detector', logs:'Logs', settings:'Feature Settings', 'face-test':'Face Detection Test'}[this.view() as 'dashboard' | 'cameras' | 'persons' | 'live' | 'logs' | 'settings' | 'face-test'];
   }
 
   login() {
