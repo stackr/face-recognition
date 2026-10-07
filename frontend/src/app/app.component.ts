@@ -433,7 +433,7 @@ export class AppComponent implements OnDestroy {
     if (this.busy()) return;
     if (!this.cameraForm.name.trim()) { this.error.set('Enter a camera name.'); return; }
     if (this.cameraForm.source_type === 'rtsp' && !this.cameraForm.rtsp_url.trim()) {
-      this.error.set('Enter an RTSP address for the CCTV input.'); return;
+      this.error.set('Enter an RTSP address.'); return;
     }
     this.busy.set(true); this.error.set('');
     const payload = {...this.cameraForm, rtsp_url:this.cameraForm.source_type === 'mp4' ? '' : this.cameraForm.rtsp_url};
