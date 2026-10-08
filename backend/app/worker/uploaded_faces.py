@@ -1,4 +1,4 @@
-"""Direct face detection for uploaded MP4; camera/session-local spatial IDs."""
+"""Direct face detection for streams and uploaded MP4; camera/session-local spatial IDs."""
 
 import math
 from itertools import count

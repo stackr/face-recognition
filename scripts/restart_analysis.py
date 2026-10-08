@@ -18,7 +18,17 @@ def main():
         for camera in checked(client.get("/api/cameras")):
             state = checked(client.get(f"/api/cameras/{camera['camera_id']}/status"))
             if state["state"] in {"opening", "running", "reconnecting", "draining"}:
-                active.append((camera["camera_id"], state["source_type"], state.get("loop", True)))
+                active.append(
+                    (
+                        camera["camera_id"],
+                        {
+                            "source_type": state["source_type"],
+                            "loop": state.get("loop", True),
+                            "person_detection_enabled": state.get("person_detection_enabled", True),
+                            "face_detection_enabled": state.get("face_detection_enabled", True),
+                        },
+                    )
+                )
         subprocess.run(
             ["systemctl", "--user", "restart", "cctv-worker.service", "cctv-backend.service"],
             check=True,
@@ -41,11 +51,11 @@ def main():
                 raise RuntimeError("Analysis service restart timed out")
         finally:
             worker.client.close()
-        for camera_id, source_type, loop in active:
+        for camera_id, selection in active:
             checked(
                 client.post(
                     f"/api/cameras/{camera_id}/start",
-                    json={"source_type": source_type, "loop": loop},
+                    json=selection,
                 )
             )
         print({"status": "passed", "resumed_cameras": [item[0] for item in active]})

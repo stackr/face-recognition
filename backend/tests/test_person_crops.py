@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import cv2
 import numpy as np
+import pytest
 from app.schemas.recognition import SamplingSettings
 from app.worker.api import create_worker
 from app.worker.runtime import CameraRun, Frame, WorkerRuntime
@@ -13,14 +14,15 @@ from test_uploaded_faces import VideoModels
 from test_worker import TestDetector, boxes, wait_for, write_video
 
 
-def test_uploaded_faces_survive_missing_people_and_body_crops_are_separate(app_context):
+@pytest.mark.parametrize("source_type", ["mp4", "rtsp"])
+def test_faces_survive_missing_people_and_body_crops_are_separate(app_context, source_type):
     settings = app_context[2]
     settings.video_face_detection_threshold = 0.1
     models = VideoModels()
     analyzer = SimpleNamespace(models=models, info={}, embed=lambda image: np.ones(512, np.float32))
     runtime = WorkerRuntime(settings, TestDetector(), analyzer)
     run = CameraRun(
-        1, "", "mp4", False, settings, person_detection_enabled=True, face_detection_enabled=True
+        1, "", source_type, False, settings, person_detection_enabled=True, face_detection_enabled=True
     )
     image = np.full((120, 160, 3), (80, 140, 180), np.uint8)
     try:

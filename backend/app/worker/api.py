@@ -340,11 +340,8 @@ def create_worker(
                 raise HTTPException(422, "Invalid RTSP source")
         person_enabled = payload.person_detection_enabled
         face_enabled = payload.face_detection_enabled
-        if payload.source_type == "rtsp":
-            if person_enabled is False:
-                raise HTTPException(422, "RTSP requires person detection")
-            person_enabled, face_enabled = True, False
-        elif person_enabled is None and not settings.person_detection_enabled and not face_enabled:
+        default_person = payload.source_type == "rtsp" or settings.person_detection_enabled
+        if person_enabled is None and not default_person and not face_enabled:
             raise HTTPException(422, "Select at least one detector")
         try:
             return request.app.state.runtime.start(

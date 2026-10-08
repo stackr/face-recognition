@@ -48,8 +48,8 @@ class CameraRun:
         self.loop, self.settings = loop, settings
         self.actual_device = actual_device
         self.clips = clips
-        self.person_detection_override = True if source_type == "rtsp" else person_detection_enabled
-        self.face_detection_enabled = source_type != "rtsp" and face_detection_enabled
+        self.person_detection_override = person_detection_enabled
+        self.face_detection_enabled = face_detection_enabled
         self.lock = threading.RLock()
         self.cancel = threading.Event()
         self.stream_session_id = uuid.uuid4().hex
@@ -461,8 +461,8 @@ class WorkerRuntime:
                     if getattr(run, "source_type", None) == "mp4":
                         if mode_changed and getattr(run, "person_detection_override", None) is None:
                             run.clear_session(rotate=True)
-                        elif criteria_changed and self.uploaded_face_mode(run):
-                            run.faces = run.result = run.jpeg = None
+                    if criteria_changed and self.direct_face_mode(run):
+                        run.faces = run.result = run.jpeg = None
                     if run.tracker:
                         run.tracker.fps = (
                             (run.input_fps or values.detection_fps)
@@ -686,12 +686,12 @@ class WorkerRuntime:
             "policy": "independent person/face cadence; bounded latest RTSP frame; lossless MP4 when all-frames enabled; rotating GPU batches",
         }
 
-    def uploaded_face_mode(self, run):
-        # This new identity-comparison path is only for user-uploaded recordings.
-        return (
-            run.source_type == "mp4"
-            and run.face_detection_enabled
-            and (not run.person_detection_enabled or run.person_detection_override is not None)
+    def direct_face_mode(self, run):
+        # Streams and explicit MP4 selections detect faces independently of people.
+        return run.face_detection_enabled and (
+            run.source_type == "rtsp"
+            or not run.person_detection_enabled
+            or run.person_detection_override is not None
         )
 
     def frame_cadence(self, run, frame):
@@ -765,7 +765,7 @@ class WorkerRuntime:
 
     def process_frame(self, run, frame, boxes, detection_ms, *, face_due=None):
         try:
-            direct = self.uploaded_face_mode(run)
+            direct = self.direct_face_mode(run)
             analyzer = self.face_analyzer
             direct_start = time.monotonic()
             tracking_time = (

@@ -12,8 +12,8 @@ from app.worker.api import create_worker
 from app.worker.reconnect import reconnect_delay
 from fastapi.testclient import TestClient
 from test_analysis import replace_worker
-from test_faces import StubFaces
 from test_foundation import PAYLOAD
+from test_uploaded_faces import VideoModels
 from test_worker import TestDetector, wait_for
 
 
@@ -56,7 +56,11 @@ def configure(settings, *, delay=0.2, maximum=0.8):
     settings.rtsp_reconnect_jitter = 0
 
 
-RTSP = {"source": "rtsp://test:unit-private@127.0.0.1:8554/smoke", "source_type": "rtsp"}
+RTSP = {
+    "source": "rtsp://test:unit-private@127.0.0.1:8554/smoke",
+    "source_type": "rtsp",
+    "face_detection_enabled": False,
+}
 
 
 def authorize(client, settings):
@@ -74,22 +78,31 @@ def test_rtsp_reconnect_clears_people_tracks_preview_and_session(app_context, mo
         return first if len(opened) == 1 else second
 
     monkeypatch.setattr(cv2, "VideoCapture", capture)
-    faces = StubFaces()
+    settings.video_face_detection_threshold = 0.1
+    models = VideoModels()
+    embeddings = []
+    faces = SimpleNamespace(
+        models=models,
+        embed=lambda image: embeddings.append(1) or np.ones(512, np.float32),
+    )
     with worker_client(settings, faces=faces) as client:
         authorize(client, settings)
-        client.post("/internal/cameras/1/start", json=RTSP)
+        client.post("/internal/cameras/1/start", json=RTSP | {"face_detection_enabled": True})
         running = wait_for(
             client,
             "/internal/cameras/1",
             lambda s: s["state"] == "running" and s["result"] and s["result"]["person_tracks"],
         )
         old = running["stream_session_id"]
+        face_path = "/internal/cameras/1/faces/1"
+        assert client.get(face_path, params={"stream_session_id": old}).status_code == 200
         path = "/internal/cameras/1/people/1"
         assert client.get(path, params={"stream_session_id": old}).status_code == 200
         first.disconnect.set()
         waiting = wait_for(client, "/internal/cameras/1", lambda s: s["state"] == "reconnecting")
         assert waiting["stream_session_id"] != old
         assert waiting["result"] is None and waiting["face_cache_tracks"] == 0
+        assert client.get(face_path, params={"stream_session_id": old}).status_code == 404
         assert waiting["pending_frames"] == waiting["session_processed_frames"] == 0
         response = client.get("/internal/cameras/1/frame")
         assert response.status_code == 204 and response.headers["X-Camera-State"] == "reconnecting"
@@ -108,9 +121,11 @@ def test_rtsp_reconnect_clears_people_tracks_preview_and_session(app_context, mo
         assert recovered["state"] == "running" and recovered["error_code"] is None
         assert recovered["stream_session_id"] == waiting["stream_session_id"]
         assert recovered["result"]["tracks"][0]["track_id"] == 1
-        assert faces.embeddings == 0
-        assert recovered["face_detection_enabled"] is False
-        assert recovered["face_detection_frames"] == 0
+        assert len(embeddings) > 0
+        assert recovered["face_detection_enabled"] is True
+        assert recovered["face_detection_frames"] > 0
+        assert recovered["result"]["independent_detection"] is True
+        assert recovered["face_cache_tracks"] > 0
         assert recovered["session_processed_frames"] < recovered["processed_frames"]
         assert recovered["pending_frames"] <= 1 and recovered["dropped_frames"] > 0
         assert client.get(path, params={"stream_session_id": old}).status_code == 404

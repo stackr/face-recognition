@@ -2,6 +2,7 @@ import time
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 from app.models import FunctionSettings
 from app.schemas.recognition import SamplingSettings
 from app.worker.face_onnx import TEMPLATE
@@ -64,7 +65,8 @@ def test_legacy_update_preserves_new_video_controls(app_context, admin_headers):
     assert result.status_code == 202 and result.json()["values"] == saved
 
 
-def test_direct_faces_compare_without_person_roi_or_strict_live_quality(app_context):
+@pytest.mark.parametrize("source_type", ["mp4", "rtsp"])
+def test_direct_faces_compare_without_person_roi_or_strict_live_quality(app_context, source_type):
     settings = app_context[2]
     settings.person_detection_enabled = False
     settings.video_face_detection_threshold = 0.1
@@ -79,7 +81,7 @@ def test_direct_faces_compare_without_person_roi_or_strict_live_quality(app_cont
         close=lambda: None,
     )
     runtime = WorkerRuntime(settings, TestDetector(), analyzer, gallery)
-    run = CameraRun(1, "", "mp4", False, settings)
+    run = CameraRun(1, "", source_type, False, settings, person_detection_enabled=False)
     try:
         for number in (1, 2):
             runtime.process_frame(run, frame(run, number), None, 0)
@@ -102,7 +104,7 @@ def test_direct_faces_compare_without_person_roi_or_strict_live_quality(app_cont
         settings.video_face_detection_threshold = 0.8
         runtime.process_frame(run, frame(run, 4), None, 0)
         assert run.result["tracks"] == [] and models.calls[-1][2] == 0.8
-        assert not runtime.uploaded_face_mode(CameraRun(2, "", "rtsp", False, settings))
+        assert runtime.direct_face_mode(CameraRun(2, "", "rtsp", False, settings))
     finally:
         runtime.close()
 

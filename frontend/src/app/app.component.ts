@@ -513,10 +513,10 @@ export class AppComponent implements OnDestroy {
   }
   activeAnalysis() { return ['opening', 'running', 'reconnecting', 'draining', 'stopping'].includes(this.analysis()?.state || ''); }
   startAnalysis() {
-    const camera = this.selectedCamera(); if (!camera?.can_operate || this.busy() || this.activeAnalysis() || (this.analysisSource === 'mp4' && !this.analysisPersonEnabled && !this.analysisFaceEnabled)) return;
+    const camera = this.selectedCamera(); if (!camera?.can_operate || this.busy() || this.activeAnalysis() || (!this.analysisPersonEnabled && !this.analysisFaceEnabled)) return;
     this.detectionSelectionChanged();
     this.busy.set(true); this.error.set(''); this.notice.set(''); this.previewFailed.set(false);
-    this.http.post<AnalysisStatus>(`/api/cameras/${camera.camera_id}/start`, {source_type:this.analysisSource, loop:this.loopVideo, person_detection_enabled:this.analysisSource === 'mp4' ? this.analysisPersonEnabled : true, face_detection_enabled:this.analysisSource === 'mp4' ? this.analysisFaceEnabled : false}, {headers:this.headers()})
+    this.http.post<AnalysisStatus>(`/api/cameras/${camera.camera_id}/start`, {source_type:this.analysisSource, loop:this.loopVideo, person_detection_enabled:this.analysisPersonEnabled, face_detection_enabled:this.analysisFaceEnabled}, {headers:this.headers()})
       .pipe(timeout(15000)).subscribe({
         next: value => { this.analysis.set(value); this.previewVersion.update(value => value + 1); this.busy.set(false); this.refreshAnalysis(); },
         error: err => { this.busy.set(false); this.handleError(err); }

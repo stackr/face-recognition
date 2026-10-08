@@ -37,7 +37,7 @@ function rtspFixture() {
   }};
 }
 
-test('RTSP person-only detection, image cleanup, recovery and stopping', async ({page}) => {
+test('RTSP face analysis, image cleanup, recovery and stopping', async ({page}) => {
   test.setTimeout(120000);
   const fixture = rtspFixture();
   let cameraId: number | undefined;
@@ -61,19 +61,27 @@ test('RTSP person-only detection, image cleanup, recovery and stopping', async (
     await page.getByRole('navigation').getByRole('button', {name:/Cameras/}).click();
     await page.getByRole('row').filter({hasText:name}).getByRole('button', {name:'Analyze Video', exact:true}).click();
     await expect(page.locator('#live-person-detection')).toBeChecked();
-    await expect(page.locator('#live-person-detection')).toBeDisabled();
-    await expect(page.locator('#live-face-detection')).not.toBeChecked();
-    await expect(page.locator('#live-face-detection')).toBeDisabled();
+    await expect(page.locator('#live-person-detection')).toBeEnabled();
+    await expect(page.locator('#live-face-detection')).toBeChecked();
+    await expect(page.locator('#live-face-detection')).toBeEnabled();
+    await page.locator('#live-person-detection').uncheck();
+    await page.locator('#live-face-detection').uncheck();
+    await expect(page.getByRole('button', {name:'Start Analysis', exact:true})).toBeDisabled();
+    await page.locator('#live-person-detection').check();
+    await page.locator('#live-face-detection').check();
     await page.getByRole('button', {name:'Start Analysis', exact:true}).click();
     await expect(page.locator('.analysis-state')).toHaveText('Analyzing', {timeout:20000});
     const thumb = page.locator('.person-track-image').first();
     await expect.poll(() => thumb.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
     const original = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
     expect(original.person_detection_enabled).toBe(true);
-    expect(original.face_detection_enabled).toBe(false);
-    expect(original.face_detection_frames).toBe(0);
-    expect(original.face_counts.embeddings_created ?? 0).toBe(0);
-    await expect(page.getByRole('heading', {name:'Face Detection', exact:true})).toHaveCount(0);
+    expect(original.face_detection_enabled).toBe(true);
+    await expect.poll(async () => (await (await page.request.get(`/api/cameras/${cameraId}/status`)).json()).face_counts.embeddings_created ?? 0, {timeout:20000}).toBeGreaterThan(0);
+    await expect(page.getByRole('heading', {name:'Face Detection', exact:true})).toBeVisible();
+    await expect(page.locator('#live-face-detection')).toBeDisabled();
+    await expect(page.locator('#live-person-detection')).toBeDisabled();
+    const faceThumb = page.locator('.face-ready img').first();
+    await expect.poll(() => faceThumb.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
     const track = original.result.person_tracks[0];
     const oldThumb = `/api/cameras/${cameraId}/people/${track.track_id}?stream_session_id=${original.stream_session_id}`;
     const preview = page.locator('.preview-screen img');
@@ -93,9 +101,12 @@ test('RTSP person-only detection, image cleanup, recovery and stopping', async (
     await expect(page.locator('.reconnect-notice')).toHaveCount(0);
     await expect.poll(() => thumb.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
     await expect.poll(() => preview.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
+    await expect.poll(() => faceThumb.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0);
     const recovered = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
     expect(recovered.stream_session_id).not.toBe(original.stream_session_id);
     expect(recovered.reconnects).toBeGreaterThan(0);
+    expect(recovered.face_detection_enabled).toBe(true);
+    expect(recovered.face_counts.embeddings_created).toBeGreaterThan(original.face_counts.embeddings_created ?? 0);
     expect((await page.request.get(oldThumb)).status()).toBe(404);
     await fixture.command('down');
     await expect(page.locator('.analysis-state')).toHaveText('Reconnecting automatically', {timeout:15000});
@@ -106,6 +117,19 @@ test('RTSP person-only detection, image cleanup, recovery and stopping', async (
     await expect(page.getByRole('button', {name:'Start Analysis', exact:true})).toBeEnabled();
     await expect(page.locator('.face-card')).toHaveCount(0);
     await expect(page.locator('.person-card')).toHaveCount(0);
+    await page.locator('#live-person-detection').uncheck();
+    await page.getByRole('button', {name:'Start Analysis', exact:true}).click();
+    await expect.poll(async () => {
+      const status = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
+      return status.face_counts.embeddings_created ?? 0;
+    }, {timeout:20000}).toBeGreaterThan(0);
+    const faceOnly = await (await page.request.get(`/api/cameras/${cameraId}/status`)).json();
+    expect(faceOnly.person_detection_enabled).toBe(false);
+    expect(faceOnly.face_detection_enabled).toBe(true);
+    expect(faceOnly.person_detection_frames).toBe(0);
+    expect(faceOnly.result.person_tracks).toEqual([]);
+    await expect(page.locator('.person-card')).toHaveCount(0);
+    await page.getByRole('button', {name:'Stop Analysis', exact:true}).click();
   } finally {
     try {
       if (cameraId !== undefined && headers) {

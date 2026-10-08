@@ -114,13 +114,10 @@ def start(
     source_type = payload.source_type or camera.source_type
     person_enabled = payload.person_detection_enabled
     face_enabled = payload.face_detection_enabled
-    if source_type == "rtsp":
-        if person_enabled is False:
-            raise HTTPException(422, "RTSP requires person detection")
-        person_enabled, face_enabled = True, False
-    elif not face_enabled:
+    if not face_enabled:
         _, controls = load_sampling(db, settings)
-        if person_enabled is None and not controls.person_detection_enabled:
+        default_person = source_type == "rtsp" or controls.person_detection_enabled
+        if person_enabled is None and not default_person:
             raise HTTPException(422, "Select at least one detector")
     if source_type == "mp4":
         if not camera.video_path:
