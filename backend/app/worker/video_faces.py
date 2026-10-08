@@ -45,24 +45,28 @@ def detect_all(
     *,
     detection_threshold=None,
     min_face_size=DEFAULT_MIN_FACE_SIZE,
+    full_frame_fallback=False,
 ):
     height, width = image.shape[:2]
-    regions = [(0, 0, width, height)]
+    regions = [(0, 0, width, height, 640)]
     if width > 960 or height > 960:
         regions += [
-            (x, y, min(x + 960, width), min(y + 960, height))
+            (x, y, min(x + 960, width), min(y + 960, height), 640)
             for y in tile_starts(height)
             for x in tile_starts(width)
         ]
+    if full_frame_fallback:
+        # Portrait crops can fill the detector input; a smaller scale recovers them.
+        regions.append((0, 0, width, height, 320))
     faces = []
-    for x, y, right, bottom in regions:
+    for x, y, right, bottom, side in regions:
         if cancel.is_set():
             raise VideoTestError("cancelled")
         # Remove the live model's ten-face cap. No YOLO person ROI or sampling cap.
         options = (
             {"score_threshold": detection_threshold} if detection_threshold is not None else {}
         )
-        detected = models.detect(image[y:bottom, x:right], side=640, max_faces=None, **options)
+        detected = models.detect(image[y:bottom, x:right], side=side, max_faces=None, **options)
         for detected_face in detected:
             box = np.asarray(detected_face["bbox"], dtype=np.float64) + [x, y, x, y]
             points = np.asarray(detected_face["landmarks"], dtype=np.float64) + [x, y]
@@ -72,7 +76,7 @@ def detect_all(
             box[2:] = np.minimum(box[2:], [width, height])
             if min(box[2:] - box[:2]) < min_face_size:
                 continue
-            faces.append(detected_face | {"bbox": box, "landmarks": points})
+            faces.append(detected_face | {"bbox": box, "landmarks": points, "detector_input": side})
     selected = []
     for face in sorted(faces, key=lambda face: face["confidence"], reverse=True):
         if any(duplicate_box(face["bbox"], prior["bbox"]) for prior in selected):

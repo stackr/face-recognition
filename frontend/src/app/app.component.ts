@@ -21,7 +21,8 @@ interface CameraForm { name: string; description: string; rtsp_url: string; loca
 interface Match {person_id: number; name: string; face_id: number; similarity: number; candidate?: boolean;}
 interface ReferenceFace {id: number; quality: number; state: string; image_available: boolean; image_expires_at: string; embedding_expires_at: string;}
 interface Person {id: number; name: string; description: string; enabled: boolean; sync_status: string; faces: ReferenceFace[];}
-interface SearchResult {matches: Match[]; threshold: number;}
+interface PhotoFace {index: number; bbox: number[]; quality: {status: string; reasons: string[]}; matches: Match[];}
+interface SearchResult {faces: PhotoFace[]; threshold: number; image_width: number; image_height: number; preview_data_url: string;}
 interface FaceStatus {
   status: string; quality: number; reasons: string[]; embedding_ready: boolean;
   face_size?: number[]; blur_score?: number; brightness?: number; yaw?: number; pitch?: number; roll?: number;
@@ -90,6 +91,8 @@ export class AppComponent implements OnDestroy {
   cropFiles = signal<File[]>([]);
   cropFileCount = 0;
   searchResult = signal<SearchResult | null>(null);
+  selectedPhotoFace = signal<number | null>(null);
+  searchAllPeople = false;
   error = signal('');
   notice = signal('');
   username = '';
@@ -210,7 +213,7 @@ export class AppComponent implements OnDestroy {
   pageTitle() {
     if (this.view() === 'person-editor') return this.user()?.role === 'admin'
       ? (this.personEditingId === null ? 'Add Person' : 'Edit Person') : 'Person Details';
-    return {dashboard:'System Readiness', cameras:'Cameras', persons:'People', live:'Live Detector', logs:'Logs', settings:'Feature Settings', 'face-test':'Face Detection Test'}[this.view() as 'dashboard' | 'cameras' | 'persons' | 'live' | 'logs' | 'settings' | 'face-test'];
+    return {dashboard:'System Status', cameras:'Cameras', persons:'People', live:'Live Detector', logs:'Logs', settings:'Feature Settings', 'face-test':'Face Detection Test'}[this.view() as 'dashboard' | 'cameras' | 'persons' | 'live' | 'logs' | 'settings' | 'face-test'];
   }
 
   login() {
@@ -317,7 +320,7 @@ export class AppComponent implements OnDestroy {
     this.personPageVersion++; this.personLoading.set(false); this.personLoadFailed.set(false);
     this.selectedPerson.set(null); this.personEditingId = null;
     this.personForm = {name: '', description: '', enabled: true};
-    this.personPermissionUsername = ''; this.searchResult.set(null); this.cropFiles.set([]); this.cropFileCount = 0;
+    this.personPermissionUsername = ''; this.searchAllPeople = false; this.selectedPhotoFace.set(null); this.searchResult.set(null); this.cropFiles.set([]); this.cropFileCount = 0;
   }
   private acceptPerson(person: Person) {
     this.selectedPerson.set(person); this.personEditingId = person.id;
@@ -348,7 +351,7 @@ export class AppComponent implements OnDestroy {
   }
   referenceUrl(person: Person, face: ReferenceFace) {return `/api/persons/${person.id}/faces/${face.id}/image`;}
   referenceError(err: HttpErrorResponse) {
-    const labels: Record<string,string> = {no_face:'No face found. Choose a photo with a clearly visible face.', multiple_faces:'Multiple faces found. Choose a photo containing only one person.', quality_rejected:'The face did not pass quality checks. Choose a large, clear, front-facing photo.', invalid_image:'Could not read the image. Choose a JPEG or PNG file.', image_dimensions_exceeded:'Choose an image with sides up to 4096 px and no more than 12 million pixels.'};
+    const labels: Record<string,string> = {no_face:'No face found. Choose a photo with a clearly visible face.', multiple_faces:'Multiple faces found. Choose a photo containing only one person.', quality_rejected:'The face did not pass quality checks. Choose a large, clear, front-facing photo.', invalid_image:'Could not read the image. Choose a JPEG or PNG file.', face_limit_exceeded:'Too many faces in this image. Choose a smaller region of the photo.', image_dimensions_exceeded:'Choose an image with sides up to 4096 px and no more than 12 million pixels.'};
     if (labels[err.error?.detail?.code]) this.error.set(labels[err.error.detail.code]);
     else if (err.status === 413) this.error.set('Images must be 10 MB or less.');
     else if (err.status === 429) this.error.set('Another image is being processed. Please try again shortly.');
@@ -403,10 +406,18 @@ export class AppComponent implements OnDestroy {
     const input = event.target as HTMLInputElement, file = input.files?.[0];
     if (!file || this.busy()) return;
     this.busy.set(true); this.error.set(''); this.notice.set(''); this.searchResult.set(null);
-    this.http.post<SearchResult>('/api/persons/search', file, {headers:{...this.headers(),'Content-Type':file.type}}).pipe(timeout(30000)).subscribe({
+    this.selectedPhotoFace.set(null);
+    const person = this.selectedPerson();
+    const params: Record<string, string> = person && !this.searchAllPeople ? {person_id:String(person.id)} : {};
+    this.http.post<SearchResult>('/api/persons/search-photo', file, {params, headers:{...this.headers(),'Content-Type':file.type}}).pipe(timeout(60000)).subscribe({
       next: result => {this.searchResult.set(result); this.busy.set(false); input.value='';},
       error: err => {this.busy.set(false); this.referenceError(err); input.value='';}
     });
+  }
+  photoFaceCandidate(face: PhotoFace) { return face.matches.some(match => match.candidate); }
+  photoCandidateCount() { return this.searchResult()?.faces.filter(face => this.photoFaceCandidate(face)).length ?? 0; }
+  photoFaceReason(face: PhotoFace) {
+    return face.quality.status === 'accepted' ? 'No searchable registered faces.' : 'Face alignment failed or face is too small to compare.';
   }
   setPersonAccess(canView: boolean) {
     const person = this.selectedPerson(); if (!person || !this.personPermissionUsername.trim() || this.busy()) return;

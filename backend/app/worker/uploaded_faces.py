@@ -99,7 +99,7 @@ class UploadedFaceAnalyzer:
             "pitch": None,
             "roll": None,
             "detector_region": "full_frame_tiled",
-            "detector_input": 640,
+            "detector_input": face.get("detector_input", 640),
         }
         return FaceCandidate(metadata, aligned)
 

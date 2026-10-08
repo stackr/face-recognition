@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
@@ -120,7 +120,7 @@ def filter_camera_status(db, user, state):
     return state
 
 
-async def analyze(request):
+async def analyze(request, *, path="/internal/references/analyze", params=None, timeout=10):
     if request.headers.get("content-type", "").split(";")[0] not in {"image/jpeg", "image/png"}:
         raise HTTPException(415, "Use a JPEG or PNG image")
     content = bytearray()
@@ -133,7 +133,9 @@ async def analyze(request):
     reply = await run_in_threadpool(
         worker.request,
         "POST",
-        "/internal/references/analyze",
+        path,
+        params=params,
+        timeout=timeout,
         content=bytes(content),
         headers={"Content-Type": "application/octet-stream"},
     )
@@ -193,6 +195,50 @@ async def search(request: Request, user=Depends(operator_user), db=Depends(get_d
             match["candidate"] = match["similarity"] >= result["threshold"]
         result["quality"] = analyzed["quality"]
         audit(db, user.id, "person.search", "gallery")
+        db.commit()
+        return result
+
+
+@router.post("/search-photo")
+async def search_photo(
+    request: Request,
+    person_id: int | None = Query(default=None, gt=0),
+    user=Depends(operator_user),
+    db=Depends(get_db),
+):
+    if person_id is not None:
+        find(db, person_id, user)
+    ids = allowed_person_ids(db, user)
+    if person_id is not None:
+        ids = [identifier for identifier in ids if identifier == person_id]
+    db.rollback()
+    if request.app.state.reference_upload_lock.locked():
+        raise HTTPException(429, "Another reference request is in progress")
+    async with request.app.state.reference_upload_lock:
+        result = await analyze(
+            request,
+            path="/internal/references/find-photo",
+            params=[("allowed_person_ids", str(identifier)) for identifier in ids],
+            timeout=35,
+        )
+        flattened = [match for face in result["faces"] for match in face["matches"]]
+        allowed = filter_matches(
+            db,
+            user,
+            {
+                "matches": flattened,
+                "gallery_revision": result["gallery_revision"],
+            },
+        )
+        eligible = {(match["person_id"], match["face_id"]) for match in allowed}
+        for face in result["faces"]:
+            face["matches"] = [
+                match | {"candidate": match["similarity"] >= result["threshold"]}
+                for match in face["matches"]
+                if (match["person_id"], match["face_id"]) in eligible and match["person_id"] in ids
+            ]
+        result.pop("gallery_revision", None)
+        audit(db, user.id, "person.search_photo", person_id or "gallery")
         db.commit()
         return result
 

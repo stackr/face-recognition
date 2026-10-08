@@ -396,6 +396,9 @@ Phase 10 비교점수 평가 도구는 얼굴 쌍·영상 구간·미등록 인�
 Phase 11 선택 Person Re-ID는 `scripts/prepare_reid.py`로 가중치를 준비하고 `scripts/check_reid.py`로 실제 CUDA 경로를 검증한다. 기본 REID_ENABLED=false이며 [Phase 11 결과](docs/phase11-report.md)에 활성화·검증·복원 명령을 기록했다. 카메라 간 연관·이동경로는 Phase 12 범위다.
 
 
+
+Edit Person의 **Compare a Test Photo**에서는 비교 사진 속 여러 얼굴을 검출해 현재 편집 중인 인물의 등록 얼굴과 각각 비교한다. **Compare all registered people**를 선택하면 조회 권한이 있는 검색 대상 인물 전체와 비교한다. 사진 위 얼굴 번호·위치와 얼굴별 유사도를 표시하고 기준을 넘는 후보는 초록색 테두리로 표시한다. 결과 표에서 얼굴 번호를 누르면 해당 위치를 강조한다. 얼굴 없음·일치 후보 없음·정렬 불가를 구분하며 시험 사진은 저장하지 않는다. JPEG/PNG·10 MB·4096px·1200만 픽셀 제한과 기존 등록 사진의 단일 얼굴·품질 검사를 유지한다. 사진 검출 기준과 최소 얼굴 크기는 Feature Settings의 얼굴 검출 설정, 후보 판정은 비교점수 기준을 사용한다.
+
 ### 4200포트 외부 접속
 
 프런트엔드 npm start는 0.0.0.0:4200에서 요청을 받는다. 외부 브라우저 주소 http://서버IP:4200를 .env의 ALLOWED_ORIGINS 배열에 추가한 뒤 backend·frontend 사용자 서비스를 재시작한다. 기존 localhost origin은 유지한다. UFW를 사용한다면 서버에서 sudo ufw allow 4200/tcp로 해당 포트를 허용한다. 라우터나 별도 네트워크 방화벽을 사용하는 경우 그 경로에서도 포트 접근이 허용되어야 한다.

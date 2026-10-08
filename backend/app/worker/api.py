@@ -2,6 +2,7 @@ import hmac
 import logging
 import time
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
@@ -277,8 +278,9 @@ def create_worker(
         finally:
             cap.release()
 
+    @app.post("/internal/references/find-photo", dependencies=[Depends(authorized)])
     @app.post("/internal/references/analyze", dependencies=[Depends(authorized)])
-    async def reference(request: Request):
+    async def reference(request: Request, allowed_person_ids: list[int] = Query(default=[])):
         from starlette.concurrency import run_in_threadpool
 
         from app.worker.reference_images import ReferenceRejected
@@ -288,9 +290,28 @@ def create_worker(
             content.extend(chunk)
             if len(content) > settings.reference_upload_max_mb * 1024 * 1024:
                 raise HTTPException(413, "Reference image too large")
+        runtime = request.app.state.runtime
+        photo_search = request.url.path.endswith("/find-photo")
+        task = bytes(content)
+        if photo_search:
+            from app.worker.reference_images import find_faces_in_photo
+
+            if runtime.gallery is None:
+                raise HTTPException(503, "Gallery unavailable")
+            image_content = bytes(content)
+            task = partial(
+                find_faces_in_photo,
+                content=image_content,
+                settings=settings,
+                cancel=runtime.cancel,
+                gallery=runtime.gallery,
+                allowed_person_ids=allowed_person_ids,
+            )
         try:
             return await run_in_threadpool(
-                request.app.state.runtime.analyze_reference, bytes(content)
+                runtime.analyze_reference,
+                task,
+                timeout_seconds=30 if photo_search else 8,
             )
         except ReferenceRejected as exc:
             return JSONResponse(

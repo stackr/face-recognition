@@ -26,7 +26,10 @@ class WorkerClient:
         if missing_ok and response.status_code == 404:
             return None
         if response.status_code != 200:
-            if path == "/internal/references/analyze" and response.status_code == 422:
+            if (
+                path in {"/internal/references/analyze", "/internal/references/find-photo"}
+                and response.status_code == 422
+            ):
                 detail = response.json().get("detail", {})
                 if isinstance(detail, dict) and detail.get("code") in {
                     "invalid_image",
@@ -34,6 +37,7 @@ class WorkerClient:
                     "no_face",
                     "multiple_faces",
                     "quality_rejected",
+                    "face_limit_exceeded",
                 }:
                     quality = detail.get("quality") or {}
                     raise HTTPException(

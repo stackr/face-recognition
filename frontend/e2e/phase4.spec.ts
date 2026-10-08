@@ -8,7 +8,7 @@ test('People, editor navigation, face comparison and deletion', async ({page, re
   await page.getByLabel('Username', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
   await page.getByLabel('Password', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
   await page.getByRole('button', {name:'Log In', exact:true}).click();
-  await expect(page.getByRole('heading', {name:'System Readiness'})).toBeVisible();
+  await expect(page.getByRole('heading', {name:/System (Readiness|Status)/})).toBeVisible();
   const auth = await (await page.request.get('/api/auth/me')).json();
   const headers = {'X-CSRF-Token':auth.csrf_token};
   let personId: number | undefined;
@@ -64,7 +64,7 @@ test('People, editor navigation, face comparison and deletion', async ({page, re
     await expect(editor.getByLabel('Person Name', {exact:true})).toHaveValue(name);
     await expect(editor.locator('.face-card')).toHaveCount(2);
     let releaseSearch!: () => void;
-    await page.route('**/api/persons/search', async route => {
+    await page.route('**/api/persons/search-photo*', async route => {
       await new Promise<void>(resolve => {releaseSearch = resolve;});
       await route.continue();
     });
@@ -77,7 +77,7 @@ test('People, editor navigation, face comparison and deletion', async ({page, re
     releaseSearch();
     const searchRow = editor.locator('.comparison-results').getByRole('row').filter({hasText:name});
     await expect(searchRow).toContainText('Similarity candidate', {timeout:15000});
-    await page.unroute('**/api/persons/search');
+    await page.unroute('**/api/persons/search-photo*');
     await page.getByLabel('Add Face Photos', {exact:false}).setInputFiles('../data/samples/zidane.jpg');
     await expect(page.getByRole('button', {name:'Save Cropped Face', exact:true})).toBeEnabled();
     await page.getByRole('button', {name:'Save Cropped Face', exact:true}).click();
@@ -100,7 +100,7 @@ test('People, editor navigation, face comparison and deletion', async ({page, re
     expect((await updated).status()).toBe(200);
     await expect(editor).toBeVisible();
     await expect(editor.getByLabel('Include in Search', {exact:true})).not.toBeChecked();
-    const disabledSearch = page.waitForResponse(response => response.url().endsWith('/api/persons/search') && response.request().method() === 'POST');
+    const disabledSearch = page.waitForResponse(response => new URL(response.url()).pathname === '/api/persons/search-photo' && response.request().method() === 'POST');
     await page.getByLabel('Photo to Compare', {exact:true}).setInputFiles('../data/calibration/person_b_reference.jpg');
     expect((await disabledSearch).status()).toBe(200);
     await expect(editor.locator('.comparison-results')).toBeVisible();

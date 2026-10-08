@@ -993,7 +993,7 @@ class WorkerRuntime:
                 )
                 run.fail("inference_failed")
 
-    def analyze_reference(self, content):
+    def analyze_reference(self, content, *, timeout_seconds=8):
         if self.face_analyzer is None or self.cancel.is_set():
             raise RuntimeError("Face analysis unavailable")
         future = Future()
@@ -1002,7 +1002,7 @@ class WorkerRuntime:
         except Full:
             raise OverflowError("Reference queue full") from None
         try:
-            return future.result(timeout=8)
+            return future.result(timeout=timeout_seconds)
         except TimeoutError:
             future.cancel()
             raise

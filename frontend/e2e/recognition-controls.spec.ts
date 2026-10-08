@@ -19,7 +19,7 @@ test('Detection and comparison settings, live analysis, photo comparison and log
   await page.getByLabel('Username', {exact:true}).fill(credentials.match(/^username: (.+)$/m)![1]);
   await page.getByLabel('Password', {exact:true}).fill(credentials.match(/^password: (.+)$/m)![1]);
   await page.getByRole('button', {name:'Log In', exact:true}).click();
-  await expect(page.getByRole('heading', {name:'System Readiness'})).toBeVisible();
+  await expect(page.getByRole('heading', {name:/System (Readiness|Status)/})).toBeVisible();
   const auth = await (await page.request.get('/api/auth/me')).json();
   headers = {'X-CSRF-Token': auth.csrf_token};
   try {
@@ -110,15 +110,15 @@ test('Detection and comparison settings, live analysis, photo comparison and log
     await page.locator('app-function-settings').screenshot({path:'../data/screenshots/match-threshold-settings-mobile.png'});
     await page.setViewportSize({width:1600, height:1000});
     await page.goto(`/#/persons/${personId}/edit`);
-    const strictPhoto = page.waitForResponse(response => response.url().endsWith('/api/persons/search') && response.request().method() === 'POST');
+    const strictPhoto = page.waitForResponse(response => new URL(response.url()).pathname === '/api/persons/search-photo' && response.request().method() === 'POST');
     await page.getByLabel('Photo to Compare', {exact:true}).setInputFiles('../data/calibration/person_b_variant.jpg');
     // Chrome may evict Blob-upload response bodies from DevTools. Verify the real
     // response as rendered by Angular without replacing the request or result.
     expect((await strictPhoto).status()).toBe(200);
     const strictRow = page.locator('.comparison-results').getByRole('row').filter({hasText:prefix});
-    await expect(page.getByText('Test threshold 1.00 · Highest similarity across the registered faces of each person', {exact:true})).toBeVisible();
+    await expect(page.locator('.photo-search-summary').filter({hasText:'Threshold 1.00'})).toBeVisible();
     await expect(strictRow).toContainText('Below threshold');
-    expect(Number(await strictRow.getByRole('cell').nth(1).textContent())).toBeLessThan(1);
+    expect(Number(await strictRow.getByRole('cell').nth(2).textContent())).toBeLessThan(1);
 
     await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button', {name:'Feature Settings'}).click();
     await expect(page.getByLabel('Similarity Threshold', {exact:true})).toHaveValue('1');
@@ -134,10 +134,10 @@ test('Detection and comparison settings, live analysis, photo comparison and log
           track.face?.comparison?.threshold === 0.7 && track.face.matches.some(match => match.person_id === personId));
     }).toBe(true);
     await page.goto(`/#/persons/${personId}/edit`);
-    const relaxedPhoto = page.waitForResponse(response => response.url().endsWith('/api/persons/search') && response.request().method() === 'POST');
+    const relaxedPhoto = page.waitForResponse(response => new URL(response.url()).pathname === '/api/persons/search-photo' && response.request().method() === 'POST');
     await page.getByLabel('Photo to Compare', {exact:true}).setInputFiles('../data/calibration/person_b_variant.jpg');
     expect((await relaxedPhoto).status()).toBe(200);
-    await expect(page.getByText('Test threshold 0.70 · Highest similarity across the registered faces of each person', {exact:true})).toBeVisible();
+    await expect(page.locator('.photo-search-summary').filter({hasText:'Threshold 0.70'})).toBeVisible();
     await expect(page.locator('.comparison-results').getByRole('row').filter({hasText:prefix})).toContainText('Similarity candidate');
     await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button', {name:'Logs'}).click();
     await expect(page.getByRole('heading', {name:'Logs', exact:true})).toBeVisible();
@@ -187,7 +187,7 @@ test('Detection and comparison settings, live analysis, photo comparison and log
           : state.result.tracks.length === 0);
     }).toBe(true);
     expect((await page.request.get(`/api/events/${eventId}`)).status()).toBe(200);
-    await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button', {name:'Live Search'}).click();
+    await page.getByRole('navigation', {name:'Main navigation'}).getByRole('button', {name:'Live Detector'}).click();
     await page.getByLabel('Camera', {exact:true}).selectOption({label:prefix});
     await page.getByText('Detailed Analysis Metrics', {exact:true}).click();
     const faceOnly = originalValues.person_detection_enabled === false;

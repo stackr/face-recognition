@@ -10,7 +10,7 @@
   <main class="container py-5"><p role="status">Checking your session.</p></main>
 } @else if (!user()) {
   <main class="login-wrap">
-    <section class="login-intro"><div class="eyebrow">PF Detector</div><h1>Manage cameras and services.</h1><p>Log in to this test environment to view registered cameras and<br>check system readiness.</p><div class="connection"><span class="dot" [class.ok]="backend() === 'Connected'"></span> Server {{ backend() }}</div></section>
+    <section class="login-intro"><div class="eyebrow">PF Detector</div><h1>Manage cameras and services.</h1><p>Log in to this test environment to view registered cameras and<br>check system status.</p><div class="connection"><span class="dot" [class.ok]="backend() === 'Connected'"></span> Server {{ backend() }}</div></section>
     <form class="card login-card" (ngSubmit)="login()">
       <h2>Log In</h2><p class="text-secondary">Log in with your assigned test account.</p>
       @if (error()) {<div class="alert alert-danger" role="alert">{{ error() }}</div>}
@@ -131,10 +131,34 @@
               </section>
               @if (user()?.role !== 'viewer') {
                 <section class="card person-page-section">
-                  <h2>Compare a Test Photo</h2><p>Compares with enabled registered people you can access. Test images are not saved.</p><label for="search-upload" class="form-label">Photo to Compare</label><input id="search-upload" type="file" accept="image/jpeg,image/png" class="form-control mb-3" (change)="searchReference($event)" [disabled]="busy()">
+                  <h2>Compare a Test Photo</h2>
+                  <p>Find {{ selectedPerson() && !searchAllPeople ? selectedPerson()!.name : 'registered people you can access' }} among the faces in a photo. Group photos are supported. Test images are not saved.</p>
+                  @if (selectedPerson()) {<label class="form-check mb-3"><input type="checkbox" class="form-check-input" [(ngModel)]="searchAllPeople" (ngModelChange)="searchResult.set(null)" [disabled]="busy()"><span class="form-check-label">Compare all registered people</span></label>}
+                  <label for="search-upload" class="form-label">Photo to Compare</label><input id="search-upload" type="file" accept="image/jpeg,image/png" class="form-control mb-3" (change)="searchReference($event)" [disabled]="busy()">
                   @if (searchResult(); as result) {
-                    <p class="text-secondary">Test threshold {{ result.threshold | number:'1.2-2' }} · Highest similarity across the registered faces of each person</p>
-                    <div class="table-responsive"><table class="table comparison-results"><thead><tr><th>Person</th><th>Cosine Similarity</th><th>Decision</th></tr></thead><tbody>@for (match of result.matches; track match.person_id) {<tr><td>{{ match.name }}</td><td>{{ match.similarity | number:'1.4-4' }}</td><td>{{ match.candidate ? 'Similarity candidate' : 'Below threshold' }}</td></tr>} @empty {<tr><td colspan="3">No searchable registered faces.</td></tr>}</tbody></table></div>
+                    <p class="photo-search-summary" role="status">{{ result.faces.length }} faces detected · {{ photoCandidateCount() }} matching faces · Threshold {{ result.threshold | number:'1.2-2' }}</p>
+                    <div class="photo-search-preview">
+                      <svg [attr.viewBox]="'0 0 ' + result.image_width + ' ' + result.image_height" role="img" aria-label="Comparison photo with numbered face locations. Green boxes indicate similarity candidates.">
+                        <image [attr.href]="result.preview_data_url" [attr.width]="result.image_width" [attr.height]="result.image_height" />
+                        @for (face of result.faces; track face.index) {
+                          <g [class.photo-face-candidate]="photoFaceCandidate(face)" [class.photo-face-selected]="selectedPhotoFace() === face.index">
+                            <title>Face #{{ face.index }}{{ photoFaceCandidate(face) ? ' · Similarity candidate' : ' · No matching candidate' }}</title>
+                            <rect [attr.x]="face.bbox[0]" [attr.y]="face.bbox[1]" [attr.width]="face.bbox[2] - face.bbox[0]" [attr.height]="face.bbox[3] - face.bbox[1]" />
+                            <text [attr.x]="face.bbox[0]" [attr.y]="face.bbox[1] > result.image_width / 45 + 6 ? face.bbox[1] - 6 : result.image_width / 45 + 6" [attr.font-size]="result.image_width / 45">#{{ face.index }}</text>
+                          </g>
+                        }
+                      </svg>
+                    </div>
+                    <small class="text-secondary d-block mb-3">Green: similarity candidate · Orange: no matching candidate. Select a face number below to highlight its location.</small>
+                    @if (!result.faces.length) {<p class="empty-state">No faces detected. Choose a photo with larger, clearly visible faces.</p>}
+                    @else if (!photoCandidateCount()) {<p class="photo-no-match">No matching registered face found in this photo.</p>}
+                    <div class="table-responsive"><table class="table comparison-results"><thead><tr><th>Face in Photo</th><th>Registered Person</th><th>Cosine Similarity</th><th>Decision</th></tr></thead><tbody>
+                      @for (face of result.faces; track face.index) {
+                        @for (match of face.matches; track match.person_id) {
+                          <tr [class.photo-result-selected]="selectedPhotoFace() === face.index"><td><button type="button" class="btn btn-sm btn-outline-secondary" (click)="selectedPhotoFace.set(face.index)" [attr.aria-pressed]="selectedPhotoFace() === face.index">Face #{{ face.index }}</button></td><td>{{ match.name }}</td><td>{{ match.similarity | number:'1.4-4' }}</td><td>{{ match.candidate ? 'Similarity candidate' : 'Below threshold' }}</td></tr>
+                        } @empty {<tr><td><button type="button" class="btn btn-sm btn-outline-secondary" (click)="selectedPhotoFace.set(face.index)">Face #{{ face.index }}</button></td><td colspan="3">{{ photoFaceReason(face) }}</td></tr>}
+                      }
+                    </tbody></table></div>
                   }
                   <small class="face-note">A similarity candidate does not confirm identity. Adjust the similarity threshold in Feature Settings. These test settings have not been calibrated for accuracy.</small>
                 </section>
